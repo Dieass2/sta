@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Telegram Bot Control Panel</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 { 
+            text-align: center; 
+            color: #4a5568; 
+            margin-bottom: 30px;
+        }
+        .input-group {
+            display: flex;
+            margin-bottom: 20px;
+            gap: 10px;
+        }
+        input { 
+            flex: 1; 
+            padding: 12px; 
+            font-size: 16px; 
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button { 
+            padding: 12px 24px; 
+            font-size: 16px; 
+            background: #667eea; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            transition: background 0.3s;
+        }
+        button:hover { 
+            background: #5a67d8; 
+        }
+        .quick-commands {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .quick-btn {
+            padding: 10px;
+            background: #edf2f7;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .quick-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .success { background: #c6f6d5; color: #22543d; }
+        .error { background: #fed7d7; color: #742a2a; }
+        .info { background: #bee3f8; color: #1a365d; }
+        .command-list {
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+        }
+        .command-list h3 {
+            margin-top: 0;
+            color: #4a5568;
+        }
+        .command-item {
+            margin: 5px 0;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Панель управления Telegram ботом</h1>
+        
+        <div class="input-group">
+            <input type="text" id="messageInput" placeholder="Введите сообщение или команду для бота...">
+            <button onclick="sendMessage()">Отправить</button>
+        </div>
+
+        <div class="quick-commands">
+            <div class="quick-btn" onclick="sendQuickMessage('/start')">🚀 /start</div>
+            <div class="quick-btn" onclick="sendQuickMessage('/help')">🆘 /help</div>
+            <div class="quick-btn" onclick="sendQuickMessage('/info')">ℹ️ /info</div>
+            <div class="quick-btn" onclick="sendQuickMessage('/time')">🕐 /time</div>
+            <div class="quick-btn" onclick="sendQuickMessage('/joke')">😂 /joke</div>
+            <div class="quick-btn" onclick="sendQuickMessage('/cat')">🐱 /cat</div>
+            <div class="quick-btn" onclick="sendQuickMessage('/echo Привет от веб-панели!')">🔊 /echo</div>
+        </div>
+
+        <div class="quick-commands">
+            <div class="quick-btn" onclick="sendQuickMessage('привет')">👋 Привет</div>
+            <div class="quick-btn" onclick="sendQuickMessage('погода')">🌡️ Погода</div>
+            <div class="quick-btn" onclick="sendQuickMessage('новости')">📰 Новости</div>
+            <div class="quick-btn" onclick="sendQuickMessage('совет')">💡 Совет</div>
+            <div class="quick-btn" onclick="sendQuickMessage('5 + 3')">🧮 Калькулятор</div>
+        </div>
+
+        <div id="status"></div>
+
+        <div class="command-list">
+            <h3>📋 Доступные команды бота:</h3>
+            <div class="command-item"><strong>/start</strong> - Запуск и приветствие</div>
+            <div class="command-item"><strong>/help</strong> - Справка по командам</div>
+            <div class="command-item"><strong>/info</strong> - Информация о боте</div>
+            <div class="command-item"><strong>/time</strong> - Текущее время</div>
+            <div class="command-item"><strong>/joke</strong> - Случайная шутка</div>
+            <div class="command-item"><strong>/cat</strong> - Факт о котиках</div>
+            <div class="command-item"><strong>/echo [текст]</strong> - Эхо-ответ</div>
+            <div class="command-item"><strong>Ключевые слова:</strong> привет, погода, новости, совет, калькулятор</div>
+        </div>
+    </div>
+
+    <script>
+        function setStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = message;
+            statusDiv.className = type;
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) {
+                setStatus('⚠️ Пожалуйста, введите сообщение', 'error');
+                return;
+            }
+            
+            setStatus('⏳ Отправка...', 'info');
+            
+            try {
+                const baseUrl = window.location.origin;
+                const response = await fetch(`${baseUrl}/send-message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    setStatus('✅ Сообщение успешно отправлено в Telegram!', 'success');
+                    messageInput.value = '';
+                } else {
+                    throw new Error(result.error || 'Неизвестная ошибка');
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                setStatus(`❌ Ошибка отправки: ${error.message}`, 'error');
+            }
+        }
+
+        function sendQuickMessage(message) {
+            document.getElementById('messageInput').value = message;
+            sendMessage();
+        }
+
+        // Отправка по Enter
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Фокус на поле ввода при загрузке
+        document.getElementById('messageInput').focus();
+    </script>
+</body>
+</html>

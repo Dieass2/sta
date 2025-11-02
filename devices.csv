@@ -1,0 +1,1 @@
+id,role,secret_token,last_ip,last_seen,camera_active,flashlight_active,co2_alert,pir_alert,power_alert,away_mode,rpi_id,is_online

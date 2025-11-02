@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Устройство</title>
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.socket.io https://cdn.jsdelivr.net">
+    <script src="/socket.io.min.js"></script>
+    <!-- <script src="https://cdn.socket.io/4.7.0/socket.io.min.js"></script> -->
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Страница для устройств</h1>
+        <div class="device-selectors">
+            <div class="camera-select">
+                <label for="cameraSelect">Камера:</label>
+                <select id="cameraSelect"></select>
+            </div>
+            <div class="mic-select">
+                <label for="micSelect">Микрофон:</label>
+                <select id="micSelect"></select>
+            </div>
+        </div>
+        <video id="video" autoplay playsinline muted></video>
+        <div id="timer"></div>
+        <div class="controls">
+            <button id="recordBtn">Начать запись</button>
+            <button id="stopBtn" disabled>Остановить</button>
+        </div>
+        <!-- - -->
+        <div id="status"></div>
+         <div id="deviceStatus" class="status pending">Ожидание регистрации...</div>
+        <div id="connectionInfo"></div>        
+        <div id="flashlightControls" style="display:none; margin-top:20px;">
+        <button onclick="window.location.href='index.html'">Перейти на главную</button>
+    </div>
+    
+    <script>
+        const video = document.getElementById('video');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const micSelect = document.getElementById('micSelect');
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const timer = document.getElementById('timer');
+        const statusDiv = document.getElementById('status');
+        
+        let mediaStream = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let countdown = null;
+        let socket = null;
+        let seconds = 3; // Длительность записи в секундах
+        
+        // Генерация уникального ID устройства
+        let deviceId = localStorage.getItem('deviceId');
+        let deviceToken = localStorage.getItem('deviceToken');
+        if (!deviceId || !deviceToken) {
+            deviceId = 'dev_' + Math.random().toString(36).substr(2, 9);
+            deviceToken = 'tok_' + Math.random().toString(36).substr(2, 18);
+            localStorage.setItem('deviceId', deviceId);
+            localStorage.setItem('deviceToken', deviceToken);
+        }
+        let currentRole = 'pending';
+        
+        // Получение списка устройств
+        async function getDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                
+                cameraSelect.innerHTML = '<option value="">-- Выберите камеру --</option>';
+                micSelect.innerHTML = '<option value="">-- Выберите микрофон --</option>';
+                
+                let firstCamera = null;
+                let firstMic = null;
+                
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `${device.kind}-${device.deviceId.slice(0, 5)}`;
+                    
+                    if (device.kind === 'videoinput') {
+                        cameraSelect.appendChild(option);
+                        if (!firstCamera) firstCamera = device.deviceId;
+                    } else if (device.kind === 'audioinput') {
+                        micSelect.appendChild(option);
+                        if (!firstMic) firstMic = device.deviceId;
+                    }
+                });
+                
+                // Автоматически выбираем первые устройства
+                if (firstCamera) cameraSelect.value = firstCamera;
+                if (firstMic) micSelect.value = firstMic;
+                
+                startDevices();
+            } catch (err) {
+                console.error('Ошибка получения устройств:', err);
+                statusDiv.textContent = 'Ошибка доступа к устройствам: ' + err.message;
+            }
+        }
+        
+        // Остановка устройств
+        function stopDevices() {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+        }
+        
+        // Запуск выбранных устройств
+        async function startDevices() {
+            stopDevices();
+            
+            const constraints = {
+                video: cameraSelect.value ? { 
+                    deviceId: { exact: cameraSelect.value },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } : false,
+                audio: micSelect.value ? { 
+                    deviceId: { exact: micSelect.value }
+                } : false
+            };
+            
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = mediaStream;
+                
+                // Проверяем реально полученные треки
+                const videoTracks = mediaStream.getVideoTracks();
+                const audioTracks = mediaStream.getAudioTracks();
+                
+                console.log('Video tracks:', videoTracks.length);
+                console.log('Audio tracks:', audioTracks.length);
+                
+                if (videoTracks.length > 0) {
+                    videoTracks[0].onended = () => {
+                        statusDiv.textContent = 'Камера отключена';
+                    };
+                }
+                
+                if (audioTracks.length > 0) {
+                    audioTracks[0].onended = () => {
+                        statusDiv.textContent = 'Микрофон отключен';
+                    };
+                    statusDiv.textContent = 'Камера и микрофон готовы';
+                } else {
+                    statusDiv.textContent = 'Камера готова (микрофон не доступен)';
+                }
+            } catch (err) {
+                console.error('Ошибка доступа:', err);
+                let errorMsg = 'Ошибка: ' + err.name;
+                
+                // Специфичные сообщения для разных ошибок
+                if (err.name === 'NotAllowedError') {
+                    errorMsg = 'Разрешите доступ к камере/микрофону в настройках браузера';
+                } else if (err.name === 'NotFoundError') {
+                    errorMsg = 'Устройство не найдено. Проверьте подключение';
+                } else if (err.name === 'NotReadableError') {
+                    errorMsg = 'Устройство занято. Закройте другие программы, использующие камеру/микрофон';
+                } else if (err.name === 'OverconstrainedError') {
+                    errorMsg = 'Невозможно удовлетворить запрошенные параметры. Попробуйте другую камеру';
+                }
+                
+                statusDiv.textContent = errorMsg;
+                
+                // Автоперезагрузка при критических ошибках
+                if (err.name === 'NotReadableError' || err.name === 'OverconstrainedError') {
+                    setTimeout(() => {
+                        getDevices();
+                    }, 2000);
+                }
+            }
+        }
+        
+        // Определение поддерживаемого формата с аудио
+        function getSupportedMimeType() {
+            const types = [
+                'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+                'video/webm;codecs="vp9,opus"',
+                'video/webm;codecs="vp8,opus"',
+                'video/webm;codecs="h264,opus"',
+                'video/webm;codecs=opus', // Только аудио
+                'audio/webm;codecs=opus', // Альтернатива для аудио
+                'video/webm', // Fallback
+                'video/mp4'   // Fallback
+            ];
+            
+            for (let type of types) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    console.log('Selected MIME:', type);
+                    return type;
+                }
+            }
+            return null;
+        }
+        
+        // Начало записи
+        function startRecording() {
+            if (!mediaStream) return;
+            
+            const mimeType = getSupportedMimeType();
+            if (!mimeType) {
+                statusDiv.textContent = 'Браузер не поддерживает запись видео';
+                return;
+            }
+            
+            recordedChunks = [];
+            const audioTracks = mediaStream.getAudioTracks();
+            console.log('Audio tracks:', audioTracks);
+
+            try {
+                const hasAudio = mediaStream.getAudioTracks().length > 0;
+                const options = {
+                    mimeType: mimeType,
+                    videoBitsPerSecond: 2500000,
+                    audioBitsPerSecond: hasAudio ? 128000 : 0
+                };
+
+                // Для браузеров на основе WebKit (Safari, Edge)
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    options.mimeType = 'video/webm;codecs=vp9,opus';
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options.mimeType = 'video/webm';
+                    }
+                }
+                mediaRecorder = new MediaRecorder(mediaStream, options);
+                
+                mediaRecorder.ondataavailable = e => {
+                    if (e.data.size > 0) recordedChunks.push(e.data);
+                };
+                
+                mediaRecorder.onstop = saveRecording;
+                mediaRecorder.start(100); // Захват данных каждые 100мс
+                if (mediaStream.getAudioTracks().length > 0) {
+                    mediaStream.getAudioTracks()[0].enabled = true;
+                    console.log('Audio track explicitly enabled');
+                }
+                
+                // Таймер записи
+                timer.textContent = `Запись: ${seconds} сек.`;
+                
+                countdown = setInterval(() => {
+                    seconds--;
+                    timer.textContent = `Запись: ${seconds} сек.`;
+                    
+                    if (seconds <= 0) {
+                        stopRecording();
+                    }
+                }, 1000);
+                
+                recordBtn.disabled = true;
+                stopBtn.disabled = false;
+                recordBtn.classList.add('recording');
+                statusDiv.textContent = 'Идет запись...';
+            } catch (err) {
+                console.error('Ошибка записи:', err);
+                statusDiv.textContent = 'Ошибка: ' + err.message;
+            }
+        }
+        
+        // Остановка записи
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                clearInterval(countdown);
+                timer.textContent = '';
+                
+                recordBtn.disabled = false;
+                stopBtn.disabled = true;
+                recordBtn.classList.remove('recording');
+                statusDiv.textContent = 'Обработка видео...';
+            }
+        }
+        
+        // Сохранение записи
+        function saveRecording() {
+            const mimeType = mediaRecorder.mimeType;
+            const isMP4 = mimeType.includes('mp4');
+            const fileExtension = isMP4 ? 'mp4' : 'webm';
+            
+            const blob = new Blob(recordedChunks, { type: mimeType });
+            const formData = new FormData();
+            const filename = `recording_${Date.now()}.${fileExtension}`;
+            const hasVideo = mediaStream.getVideoTracks().length > 0;
+            formData.append('hasVideo', hasVideo.toString());
+            formData.append('video', blob, filename);
+            
+            fetch('https://ecodom.asia/api/save_video', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    statusDiv.textContent = `Видео сохранено: ${filename}`;
+                } else {
+                    statusDiv.textContent = 'Ошибка: ' + data.error;
+                }
+            })
+            .catch(err => {
+                console.error('Ошибка сохранения:', err);
+                statusDiv.textContent = 'Ошибка сети: ' + err.message;
+            })
+            .finally(() => {
+                // Перезагружаем устройства после записи
+                setTimeout(() => {
+                    getDevices();
+                }, 1000);
+            });
+        }
+        
+        // Регистрация устройства
+        async function registerDevice() {
+            try {
+                const response = await fetch('https://ecodom.asia/api/register_device', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        deviceId: deviceId,
+                        token: deviceToken
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                if (data.status === "success" && data.secret_token) {
+                    deviceToken = data.secret_token;
+                    localStorage.setItem('deviceToken', deviceToken);
+                    console.log('Устройство зарегистрировано. Токен:', deviceToken);
+                    
+                    // Обновляем информацию о подключении
+                    const connectionInfo = document.getElementById('connectionInfo');
+                    connectionInfo.innerHTML = `ID: <strong>${deviceId}</strong><br>Token: ${deviceToken}`;
+                    
+                    return true;
+                } else {
+                    throw new Error(data.error || "Unknown registration error");
+                }
+            } catch (error) {
+                console.error('Ошибка регистрации:', error);
+                statusDiv.textContent = 'Ошибка регистрации устройства: ' + error.message;
+                return false;
+            }
+        }
+        
+        // Проверка статуса устройства
+        async function checkDeviceState() {
+            try {
+                const response = await fetch(`https://ecodom.asia/api/device/status?device_id=${deviceId}&token=${deviceToken}`);
+                
+                if (response.status === 403) {
+                    console.log('Токен недействителен, перерегистрируем устройство');
+                    const success = await registerDevice();
+                    if (success) {
+                        // Повторная проверка после регистрации
+                        return await checkDeviceState();
+                    }
+                    return null;
+                }
+                
+                if (response.status === 500) {
+                    throw new Error('Server error');
+                }
+                
+                if (response.status === 502) {
+                    console.warn('Server overloaded, retrying...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    return await checkDeviceState();
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                console.error('Ошибка при проверке состояния:', error);
+                return null;
+            }
+        }
+        
+        // Обновление статуса устройства
+        async function updateStatus() {
+            const state = await checkDeviceState();
+            const deviceStatus = document.getElementById('deviceStatus');
+            
+            if (state) {
+                updateDeviceState(state);
+            } else {
+                deviceStatus.textContent = 'Ошибка получения статуса устройства';
+                deviceStatus.className = 'status error';
+                
+                // Пытаемся перерегистрировать устройство при ошибке
+                setTimeout(() => {
+                    registerDevice().then(success => {
+                        if (success) {
+                            updateStatus();
+                        }
+                    });
+                }, 5000);
+            }
+        }
+        
+        // Обновление состояния устройства
+        function updateDeviceState(data) {
+            currentRole = data.role;
+            const deviceStatus = document.getElementById('deviceStatus');
+            const flashlightControls = document.getElementById('flashlightControls');
+            
+            // Обновление статуса
+            deviceStatus.className = 'status ' + currentRole;
+            deviceStatus.textContent = currentRole === 'pending' 
+                ? 'Ожидание подтверждения' 
+                : `Устройство: ${currentRole === 'flashlight' ? 'свет' : 'Камера'}`;
+            
+            // Управление светом
+            if (currentRole === 'flashlight') {
+                flashlightControls.style.display = 'block';
+                handleFlashlightState(data.flashlight_active);
+            } else {
+                flashlightControls.style.display = 'none';
+            }
+            
+            // Управление камерой
+            if (currentRole === 'camera') {
+                handleCameraState(data.camera_active);
+            } else if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                if (video.srcObject) {
+                    video.srcObject = null;
+                }
+            }
+        }
+        
+        // Обработка состояния света
+        async function handleFlashlightState(isActive) {
+            const deviceStatus = document.getElementById('deviceStatus');
+            
+            if (isActive) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment' }
+                    });
+                    const track = stream.getVideoTracks()[0];
+                    await track.applyConstraints({
+                        advanced: [{ torch: true }]
+                    });
+                    deviceStatus.classList.add('active');
+                    deviceStatus.textContent = 'свет: ВКЛ';
+                } catch (error) {
+                    console.error('Ошибка включения света:', error);
+                    deviceStatus.textContent = 'Ошибка включения света';
+                }
+            } else {
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => {
+                        track.stop();
+                    });
+                    mediaStream = null;
+                }
+                deviceStatus.classList.remove('active');
+                deviceStatus.textContent = 'свет: ВЫКЛ';
+            }
+        }
+        
+        // Обработка состояния камеры
+        function handleCameraState(isActive) {
+            if (isActive) {
+                startDevices();
+            } else if (mediaStream) {
+                stopDevices();
+            }
+        }
+        
+        // Инициализация WebSocket
+        function initSocket() {
+            socket = io('https://ecodom.asia', {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5
+            });
+
+            socket.on('connect', () => {
+                console.log('Connected to WebSocket');
+                socket.emit('register_device', { 
+                    deviceId: deviceId, 
+                    token: deviceToken 
+                });
+            });
+
+            socket.on('registration_result', (data) => {
+                if (data.status === 'success' && data.secret_token) {
+                    const newToken = data.secret_token;
+                    localStorage.setItem('deviceToken', newToken);
+                    deviceToken = newToken;
+                    
+                    const connectionInfo = document.getElementById('connectionInfo');
+                    connectionInfo.innerHTML = `ID: <strong>${deviceId}</strong><br>Token: ${newToken}`;
+                    
+                    const deviceStatus = document.getElementById('deviceStatus');
+                    deviceStatus.textContent = 'Устройство зарегистрировано';
+                    deviceStatus.className = 'status success';
+                } else {
+                    console.error('Ошибка регистрации:', data.message);
+                    const deviceStatus = document.getElementById('deviceStatus');
+                    deviceStatus.textContent = 'Ошибка регистрации: ' + (data.message || 'неизвестная ошибка');
+                    deviceStatus.className = 'status error';
+                }
+            });
+
+            socket.on('device_command', (data) => {
+                if (data.deviceId === deviceId) {
+                    if (data.command === 'flashlight') {
+                        handleFlashlightState(data.value);
+                    } else if (data.command === 'camera') {
+                        handleCameraState(data.value);
+                    }
+                }
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Socket connection error:', error);
+            });
+
+            return socket;
+        }
+        
+        // Инициализация при загрузке страницы
+        window.addEventListener('DOMContentLoaded', async () => {
+            const connectionInfo = document.getElementById('connectionInfo');
+            connectionInfo.innerHTML = `ID устройства: <strong>${deviceId}</strong><br>Токен: ${deviceToken}`;
+            
+            // Инициализация WebSocket
+            initSocket();
+            
+            // Первоначальная регистрация устройства
+            const registrationSuccess = await registerDevice();
+            if (registrationSuccess) {
+                // Первоначальная проверка статуса
+                updateStatus();
+            }
+            
+            // Периодическая проверка статуса и отправка heartbeat
+            setInterval(() => {
+                if (socket && socket.connected) {
+                    socket.emit('heartbeat', { deviceId });
+                }
+                updateStatus();
+            }, 10000);
+            
+            // Проверка поддержки API
+            if (typeof MediaRecorder === 'undefined' || 
+                typeof MediaRecorder.isTypeSupported !== 'function') {
+                statusDiv.textContent = 'Браузер не поддерживает запись видео/аудио';
+                return;
+            }
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusDiv.textContent = 'Ваш браузер не поддерживает запись видео';
+                return;
+            }
+            
+            // Запрос разрешений
+            try {
+                const videoPromise = navigator.mediaDevices.getUserMedia({ video: true });
+                const audioPromise = navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                await Promise.any([videoPromise, audioPromise]);
+                getDevices();
+            } catch (err) {
+                console.error('Ошибка разрешений:', err);
+                statusDiv.textContent = 'Разрешите доступ хотя бы к одной камере или микрофону';
+                
+                // Показываем кнопку для повторной попытки
+                const retryBtn = document.createElement('button');
+                retryBtn.textContent = 'Повторить попытку';
+                retryBtn.onclick = () => location.reload();
+                statusDiv.appendChild(retryBtn);
+            }
+            
+            // Обработчики событий
+            cameraSelect.addEventListener('change', startDevices);
+            micSelect.addEventListener('change', startDevices);
+            recordBtn.addEventListener('click', startRecording);
+            document.getElementById('recordBtn').innerHTML = `Начать запись (${seconds} секунд)`;
+            stopBtn.addEventListener('click', stopRecording);
+        });
+    </script>
+</body>
+</html>
