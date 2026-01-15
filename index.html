@@ -4,263 +4,309 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ecodom</title>
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.socket.io https://cdn.jsdelivr.net">
-    <script src="/socket.io.min.js"></script>
-    <!-- <script src="https://cdn.socket.io/4.7.0/socket.io.min.js"></script> -->
-    <meta name="description" content="EcoDom - система умного дома на Raspberry Pi. Управление температурой, безопасностью, видеонаблюдением и энергопотреблением через веб-интерфейс.">
-    <meta property="og:description" content="Интеллектуальная система управления домом">
-    <meta property="og:image" content="https://ecodom.asia/og-image.jpg">
-
-    <meta name="keywords" content="умный дом, ecodom, raspberry pi, безопасность дома, видеонаблюдение">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <!-- Для соц.сетей (index.html) -->
-    <meta property="og:title" content="EcoDom - Умный дом">
-    <meta name="twitter:card" content="summary_large_image">
-    
-    <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- PWA Meta Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="EcoDom">
-    <!-- Theme Color -->
+    <meta name="description" content="EcoDom - система умного дома на Raspberry Pi.">
+    <script src="/chart.js"></script>
+    <!-- <script src="/jsmpeg.min.js"></script> -->
     <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
     <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
     <link rel="stylesheet" href="index.css">
+    <script src="/hls.js"></script>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
 </head>
 <body>
-   <div id="demoWarning">
+   <div id="demoWarning" data-key="demo.warning" style="display: none;">
         Вы используете демо-режим. Для полного доступа войдите с учетными данными
     </div>    
     <header>
         <div class="header-inner">
-            <h1>EcoDom</h1>
+            <h1 data-key="app.name">EcoDom</h1>
             <div class="header-controls">
-                <button id="themeToggle">Темная тема</button>
-                <button id="logoutBtn">Выйти</button>
+                <div class="language-switcher">
+                    <button class="lang-btn" data-lang="ru">RU</button>
+                    <button class="lang-btn" data-lang="en">EN</button>
+                    <button class="lang-btn" data-lang="kz">KZ</button>
+                </div>
+                <button id="themeToggle" class="icon-btn" aria-label="Theme">🌓</button>
+                <button id="logoutBtn" class="icon-btn" aria-label="Logout">🚪</button>
             </div>
         </div>
     </header>
+    
     <nav>
         <div class="nav-inner">
-            <button class="tab-btn active" data-tab="dashboard">Главная</button>
-            <button class="tab-btn" data-tab="history">История</button>
-            <button class="tab-btn" data-tab="devices">Устройства</button>
-            <button class="tab-btn" data-tab="settings">Настройки</button>
+            <button class="tab-btn active" data-tab="dashboard" data-key="tab.dashboard">Главная</button>
+            <button class="tab-btn" data-tab="history" data-key="tab.history">История</button>
+            <button class="tab-btn" data-tab="settings" data-key="tab.settings">Настройки</button>
         </div>
     </nav>
+
     <main>
-        <div id="sensor-error" class="error-message" style="display: none; color: var(--danger); padding: 10px; text-align: center;"></div>
+        <div id="sensor-error" class="error-message" style="display: none;"></div>
         <div class="container">
+            
+            <!-- DASHBOARD -->
             <div id="dashboard" class="tab-content active">
-                    <h2>Текущие показания</h2>
-                    <div class="sensors-grid">
-                       <!-- В блоке сенсоров -->
-                        <div class="sensor-card">
-                            <h3>Температура</h3>    
-                            <p id="temp-value">--</p>
-                            <p>°C</p>
-                        </div>
-                        <div class="sensor-card">
-                            <h3>Влажность</h3>
-                            <p id="humidity-value">--</p>
-                            <p>%</p>
-                        </div>
-                        <div class="sensor-card">
-                            <h3>CO (ppm)</h3>
-                            <p id="co-value">--</p>
-                        </div>
-                        <div class="sensor-card">
-                            <h3>Солнечные панели</h3>
-                            <p id="solar-value">--</p>
-                            <p>В</p>
-                        </div>
-                        <div class="sensor-card">
-                            <h3>Ветрогенератор</h3>
-                            <p id="wind-value">--</p>
-                            <p>В</p>
-                        </div>
-                        <div class="sensor-card">
-                            <h3>Движение</h3>
-                            <p id="motion-value">--</p>
-                        </div>
-                        <div class="sensor-card">
-                            <h3>Батарея</h3>
-                            <p id="battery-value">--</p>
-                            <span id="battery-icon" class="battery-icon"></span>
-                            <p>%</p>
-                        </div>
+                <h2 data-key="dashboard.title">Текущие показания</h2>
+                <div class="sensors-grid">
+                    <div class="sensor-card">
+                        <h3 data-key="temperature">Температура</h3>    
+                        <p id="temp-value">--</p>
+                        <p>°C</p>
                     </div>
-                    <div class="device-section">
-                    <h2>Камеры наблюдения</h2>
-                    <div id="camerasContainer" class="cameras-container"></div>
+                    <div class="sensor-card">
+                        <h3 data-key="humidity">Влажность</h3>
+                        <p id="humidity-value">--</p>
+                        <p>%</p>
+                    </div>
+                    <div class="sensor-card">
+                        <h3 data-key="co">CO (ppm)</h3>
+                        <p id="co-value">--</p>
+                    </div>
+                    <div class="sensor-card">
+                        <h3 data-key="solar">Солнечные панели</h3>
+                        <p id="solar-value">--</p>
+                        <p>Вт</p>
+                    </div>
+                    <div class="sensor-card">
+                        <h3 data-key="wind">Ветрогенератор</h3>
+                        <p id="wind-value">--</p>
+                        <p>В</p>
+                    </div>
+                    <div class="sensor-card">
+                        <h3 data-key="motion">Движение</h3>
+                        <p id="motion-value">--</p>
+                    </div>
+                    <div class="sensor-card">
+                        <h3 data-key="battery">Батарея</h3>
+                        <p id="battery-value">--</p>
+                        <span id="battery-icon" class="battery-icon"></span>
+                        <p>%</p>
+                    </div>
                 </div>
 
-                  
-                <div class="main-controls">
-                    <h2>Управление освещением</h2>
-                    <div class="control-grid" id="lightingControls">
-                    <!-- Карточки будут добавляться сюда -->
+                <!-- <div class="device-section">
+                    <div style="margin-top: 20px;">
+                        <h4>Список камер:</h4>
+                        <div id="ipCamList" class="overlay-list">
+                            // Список камер загрузится через JS
+                        </div>
                     </div>
+                    
+                </div> -->
+
+                <div class="device-section">
+                    <div class="section-header">
+                        <h2 data-key="cameras.title">Мои устройства</h2>
+                        <!-- <button id="refreshDevicesBtn" class="refresh-btn">🔄</button> -->
+                    </div>
+                    
+                    <!-- Статистика устройств -->
+                    <div class="device-stats-bar">
+                        <span class="stat-badge total">Всего: <b id="totalDevices">0</b></span>
+                        <span class="stat-badge online">Онлайн: <b id="onlineDevices">0</b></span>
+                        <span class="stat-badge offline">Офлайн: <b id="offlineDevices">0</b></span>
+                    </div>
+
+                    <!-- Контейнер для карточек камер -->
+                    <div id="camerasContainer" class="devices-grid">
+                        <div class="loading-spinner">Загрузка устройств...</div>
+                    </div>
+                </div>
                 
-                    <h2>Сценарии</h2>
+                <div class="main-controls">
+                    <!-- <h2 data-key="lighting.title">Управление освещением</h2>
+                    <div class="control-grid" id="lightingControls"></div> -->
+                
+                    <h2 data-key="scenarios.title">Сценарии</h2>
                     <div class="scenario-control">
                         <label class="switch">
                             <input type="checkbox" id="awayScenario">
                             <span class="slider"></span>
                         </label>
-                        <span>Режим "Уход"</span>
+                        <span data-key="scenario.away">Режим "Уход"</span>
                     </div>
                 </div>
             </div>
             
+            <!-- HISTORY -->
             <div id="history" class="tab-content">
-                <h2>История показаний</h2>
+                <h2 data-key="history.title">История показаний</h2>
                 <div class="history-controls">
                     <select id="historySensor">
-                        <option value="temp">Температура</option>
-                        <option value="humidity">Влажность</option>
-                        <option value="co_ppm">CO (ppm)</option>
-                        <option value="solar_voltage">Солнечные панели</option>
-                        <option value="wind_voltage">Ветрогенератор</option>
-                        <option value="battery_level">Батарея</option>
-                        <option value="motion">Движение</option>
+                        <option value="temp" data-key="temperature">Температура</option>
+                        <option value="humidity" data-key="humidity">Влажность</option>
+                        <option value="co_ppm" data-key="co">CO (ppm)</option>
+                        <option value="solar_voltage" data-key="solar">Солнечные панели</option>
+                        <option value="wind_voltage" data-key="wind">Ветрогенератор</option>
+                        <option value="battery_level" data-key="battery">Батарея</option>
+                        <option value="motion" data-key="motion">Движение</option>
                     </select>
                     <select id="historyRange">
-                        <option value="1">За день</option>
-                        <option value="7">За неделю</option>
-                        <option value="30">За месяц</option>
+                        <option value="1" data-key="history.day">За день</option>
+                        <option value="7" data-key="history.week">За неделю</option>
+                        <option value="30" data-key="history.month">За месяц</option>
                     </select>
                 </div>
                 <div class="chart-container">
                     <canvas id="historyChart"></canvas>
+                </div>
             </div>
-            </div>
-
-            <div id="devices" class="tab-content">
-                    <div class="tabs">
-                        <div class="tab active" data-tab="devices-dashboard">Главная</div>
-                        <div class="tab" data-tab="devices-list">Устройства</div>
-                        <div class="tab" data-tab="add-device">Добавить устройство</div>
-                    </div>
-                    
-                    <div id="devices-dashboard" class="tab-content active">
-                        <h2>Панель управления устройствами</h2>
-                        <div class="device-list" id="devicesContainer">
-                            <!-- Устройства будут загружены динамически -->
-                        </div>
-                    </div>
-
-                    <div id="devices-list" class="tab-content">
-                        <h2>Мои устройства</h2>
-                        <div class="card">
-                            <table id="devicesTable">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Роль</th>
-                                        <th>Статус</th>
-                                        <th>Последняя активность</th>
-                                        <th>Действия</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Данные будут загружены динамически -->
-                                     
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div id="add-device" class="tab-content">
-                        <h2>Добавить устройство</h2>
-                        <div class="card">
-                            <div class="input-group">
-                                <label for="deviceId">ID устройства:</label>
-                                <input type="text" id="deviceIdInput" placeholder="Введите ID устройства">
-                            </div>
-                            <div class="input-group">
-                                <label for="deviceRole">Тип устройства:</label>
-                                <select id="deviceRole">
-                                    <option value="flashlight">Свет</option>
-                                    <option value="camera">Камера</option>
-                                </select>
-                            </div>
-                            <button id="addDeviceBtn" class="form-btn">Добавить устройство</button>
-                            <button onclick="window.location.href='device.html'">Перейти на страницу для устройств</button>
-                            <div id="addDeviceStatus" style="margin-top: 15px;"></div>
-                        </div>
-                    </div>
-            </div>
-
+            
+            <!-- SETTINGS -->
             <div id="settings" class="tab-content">
-                <h2>Настройки</h2>
-                <!-- Карточка смены пароля -->
-                <div class="settings-card">
-                    <h3>Сменить пароль</h3>
+                <h2 data-key="settings.title">Настройки</h2>
+                <!-- Контент настроек без изменений... -->
+                 <div class="settings-card">
+                    <h3 data-key="settings.password">Сменить пароль</h3>
                     <form id="changePasswordForm">
                         <div class="input-group">
-                            <label for="currentPassword">Текущий пароль</label>
+                            <label for="currentPassword" data-key="settings.currentPassword">Текущий пароль</label>
                             <input type="password" id="currentPassword" required>
                         </div>
                         <div class="input-group">
-                            <label for="newPassword">Новый пароль</label>
+                            <label for="newPassword" data-key="settings.newPassword">Новый пароль</label>
                             <input type="password" id="newPassword" required>
                         </div>
                         <div class="input-group">
-                            <label for="confirmPassword">Подтвердите пароль</label>
+                            <label for="confirmPassword" data-key="settings.confirmPassword">Подтвердите пароль</label>
                             <input type="password" id="confirmPassword" required>
                         </div>
-                        <button type="submit" class="form-btn">Сохранить</button>
+                        <button type="submit" class="form-btn" data-key="settings.save">Сохранить</button>
                     </form>
                 </div>
-                <!-- Карточка уведомлений -->
+
                 <div class="settings-card">
-                    <h3>Уведомления</h3>
-                    <button id="enableFCM" class="fcm-btn">Разрешить push-уведомления</button>
+                    <h3 data-key="settings.notifications">Уведомления</h3>
+                    <button id="enableFCM" class="form-btn" data-key="settings.enablePush">Разрешить push-уведомления</button>
                     
                     <div class="toggle-row">
                         <label class="switch">
                             <input type="checkbox" id="coNotifications" checked>
                             <span class="slider"></span>
                         </label>
-                        <p>Уведомления о CO</p>
+                        <p data-key="settings.coNotifications">Уведомления о CO</p>
                     </div>
                     <div class="toggle-row">
                         <label class="switch">
                             <input type="checkbox" id="motionNotifications" checked>
                             <span class="slider"></span>
                         </label>
-                        <p>Уведомления о движении</p>
+                        <p data-key="settings.motionNotifications">Уведомления о движении</p>
                     </div>
-                    
                     <div class="toggle-row">
                         <label class="switch">
                             <input type="checkbox" id="energyNotifications" checked>
                             <span class="slider"></span>
                         </label>
-                        <p>Уведомления о питании</p>
+                        <p data-key="settings.energyNotifications">Уведомления о питании</p>
                     </div>
                 </div>
                 
-                <!-- Карточка статуса -->
                 <div class="settings-card">
-                    <h3>Статус Raspberry Pi</h3>
+                    <h3 data-key="settings.status">Статус Raspberry Pi</h3>
                     <div class="status-display">
                         <span id="statusIcon">●</span> 
-                        <span id="statusText">Проверка...</span>
+                        <span id="statusText" data-key="settings.checking">Проверка...</span>
                     </div>
                 </div>
+
+
                 <div class="settings-card">
-                    <a id="telegramButton" href="#">
-                        <button>Перейти в Telegram-бота</button>
-                    </a>
+                    <h3 data-key="wifi.title">Настройки Сети Raspberry</h3>
+                    <form id="networkForm">
+                        <h4>WiFi Клиент (Подключение к роутеру)</h4>
+                        <div class="input-group">
+                            <label>WiFi SSID</label>
+                            <input type="text" id="wifiSSID" placeholder="Название сети">
+                        </div>
+                        <div class="input-group">
+                            <label>WiFi Password</label>
+                            <input type="text" id="wifiPass" placeholder="Пароль">
+                        </div>
+
+                        <!-- <h4 style="margin-top: 15px;">Точка Доступа (Раздача)</h4>
+                        <div class="input-group">
+                            <label>AP SSID</label>
+                            <input type="text" id="apSSID" placeholder="Имя точки доступа">
+                        </div>
+                        <div class="input-group">
+                            <label>AP Password</label>
+                            <input type="text" id="apPass" placeholder="Пароль точки доступа">
+                        </div> -->
+
+                        <button type="submit" class="form-btn" data-key="settings.save">Сохранить настройки сети</button>
+                    </form>
+                </div>
+                
+                <div class="settings-card">
+                    <h3>Управление IP Камерами (RTSP)</h3>
+                    
+                    <!-- Форма добавления -->
+                    <form id="ipCamForm">
+                         <div class="input-group">
+                            <label>Название камеры</label>
+                            <input type="text" id="camName" placeholder="Например: Кухня" required>
+                        </div>
+                        <div class="input-group">
+                            <label>RTSP Ссылка (Полная)</label>
+                            <input type="text" id="camLink" placeholder="rtsp://admin:pass@192.168.1.X:554/..." required>
+                            <small style="color: #666; font-size: 0.8em;">Для обычных камер формат: rtsp://логин:пароль@IP:554/поток</small>
+                        </div>
+                        <button type="submit" class="form-btn">Добавить камеру</button>
+                    </form>
+
+                    <!-- Список добавленных камер -->
+                    
+                     
+                </div>
+                
+                 <div class="settings-card">
+                     <a id="telegramButton" href="#" target="_blank" rel="noopener noreferrer" 
+                        class="form-btn" style="display: block; text-align: center; text-decoration: none; box-sizing: border-box; width: 100%;">Перейти в Telegram-бота</a>
+                    <!-- <button class="form-btn" onclick="window.location.href='device.html'">Перейти на страницу для устройств</button> -->
+                </div>
             </div>
         </div>
     </main>
 
+    <!-- overlay -->
+      <div id="deviceOverlay" class="overlay">
+        <div class="overlay-content">
+            <div class="overlay-header">
+                <h2 id="overlayTitle">Устройство</h2>
+                <button class="close-overlay" onclick="closeDeviceOverlay()">&times;</button>
+            </div>
+            
+            <div id="overlayPlayerContainer" class="video-player-box" style="display: none;">
+                <video id="overlayVideo" controls playsinline muted></video>
+                <button class="close-video-btn" onclick="closeOverlayVideo()">Закрыть видео</button>
+            </div>
+
+            <div id="overlayDetails" class="device-details-grid">
+            </div>
+
+            <div id="overlayControlsPanel" class="device-controls-section" style="padding: 20px; border-bottom: 1px solid var(--divider);">
+                <h3>Управление</h3>
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="sendDeviceAction('record')">🔴 Запись</button>
+                    <input type="number" id="recordSeconds" value="10" min="1" max="60" style="width: 70px; padding: 8px; border-radius: 6px; border: 1px solid #ccc;">
+                    <span>сек.</span>
+                    <button class="btn" onclick="sendDeviceAction('stop_record')">⬛ Стоп</button>
+                    <button id="overlayFlashBtn" class="btn" style="background: #FFC107; color: black; display: none;" onclick="sendDeviceAction('flashlight')">🔦 Фонарь</button>
+                </div>
+            </div>
+
+            <div class="video-list-section">
+                <h3>Записи видео</h3>
+                <div id="overlayVideosList" class="overlay-list">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    
+
+    <script src="language-manager.js"></script>
     <script src="index.js"></script>
 </body>
 </html>
