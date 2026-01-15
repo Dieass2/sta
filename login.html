@@ -1,205 +1,189 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <title>Telegram Bot Control Panel</title>
-    <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            max-width: 800px; 
-            margin: 0 auto; 
-            padding: 20px; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        .container {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-        h1 { 
-            text-align: center; 
-            color: #4a5568; 
-            margin-bottom: 30px;
-        }
-        .input-group {
-            display: flex;
-            margin-bottom: 20px;
-            gap: 10px;
-        }
-        input { 
-            flex: 1; 
-            padding: 12px; 
-            font-size: 16px; 
-            border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            transition: border-color 0.3s;
-        }
-        input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        button { 
-            padding: 12px 24px; 
-            font-size: 16px; 
-            background: #667eea; 
-            color: white; 
-            border: none; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            transition: background 0.3s;
-        }
-        button:hover { 
-            background: #5a67d8; 
-        }
-        .quick-commands {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 10px;
-            margin: 20px 0;
-        }
-        .quick-btn {
-            padding: 10px;
-            background: #edf2f7;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.3s;
-        }
-        .quick-btn:hover {
-            background: #667eea;
-            color: white;
-        }
-        #status {
-            margin: 20px 0;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            font-weight: bold;
-        }
-        .success { background: #c6f6d5; color: #22543d; }
-        .error { background: #fed7d7; color: #742a2a; }
-        .info { background: #bee3f8; color: #1a365d; }
-        .command-list {
-            background: #f7fafc;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 30px;
-        }
-        .command-list h3 {
-            margin-top: 0;
-            color: #4a5568;
-        }
-        .command-item {
-            margin: 5px 0;
-            padding: 5px;
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoDom - Вход</title>
+    <meta name="description" content="Вход в систему умного дома EcoDom. Управление домом через Raspberry Pi и смартфон">
+    <meta name="keywords" content="умный дом, ecodom, raspberry pi, безопасность дома, видеонаблюдение">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <div class="container">
-        <h1>🤖 Панель управления Telegram ботом</h1>
-        
-        <div class="input-group">
-            <input type="text" id="messageInput" placeholder="Введите сообщение или команду для бота...">
-            <button onclick="sendMessage()">Отправить</button>
-        </div>
-
-        <div class="quick-commands">
-            <div class="quick-btn" onclick="sendQuickMessage('/start')">🚀 /start</div>
-            <div class="quick-btn" onclick="sendQuickMessage('/help')">🆘 /help</div>
-            <div class="quick-btn" onclick="sendQuickMessage('/info')">ℹ️ /info</div>
-            <div class="quick-btn" onclick="sendQuickMessage('/time')">🕐 /time</div>
-            <div class="quick-btn" onclick="sendQuickMessage('/joke')">😂 /joke</div>
-            <div class="quick-btn" onclick="sendQuickMessage('/cat')">🐱 /cat</div>
-            <div class="quick-btn" onclick="sendQuickMessage('/echo Привет от веб-панели!')">🔊 /echo</div>
-        </div>
-
-        <div class="quick-commands">
-            <div class="quick-btn" onclick="sendQuickMessage('привет')">👋 Привет</div>
-            <div class="quick-btn" onclick="sendQuickMessage('погода')">🌡️ Погода</div>
-            <div class="quick-btn" onclick="sendQuickMessage('новости')">📰 Новости</div>
-            <div class="quick-btn" onclick="sendQuickMessage('совет')">💡 Совет</div>
-            <div class="quick-btn" onclick="sendQuickMessage('5 + 3')">🧮 Калькулятор</div>
-        </div>
-
-        <div id="status"></div>
-
-        <div class="command-list">
-            <h3>📋 Доступные команды бота:</h3>
-            <div class="command-item"><strong>/start</strong> - Запуск и приветствие</div>
-            <div class="command-item"><strong>/help</strong> - Справка по командам</div>
-            <div class="command-item"><strong>/info</strong> - Информация о боте</div>
-            <div class="command-item"><strong>/time</strong> - Текущее время</div>
-            <div class="command-item"><strong>/joke</strong> - Случайная шутка</div>
-            <div class="command-item"><strong>/cat</strong> - Факт о котиках</div>
-            <div class="command-item"><strong>/echo [текст]</strong> - Эхо-ответ</div>
-            <div class="command-item"><strong>Ключевые слова:</strong> привет, погода, новости, совет, калькулятор</div>
+    <div class="login-wrapper">
+        <div class="login-container">
+            <!-- Языковой переключатель -->
+            <div class="login-language-switcher">
+                <button class="lang-btn" data-lang="ru">RU</button>
+                <button class="lang-btn" data-lang="en">EN</button>
+                <button class="lang-btn" data-lang="kz">KZ</button>
+            </div>
+            
+            <div class="login-logo">
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="50" cy="50" r="45" fill="#4CAF50"/>
+                    <path d="M30,30 L70,70 M70,30 L30,70" stroke="white" stroke-width="8"/>
+                </svg>
+            </div>
+            <h1 data-key="app.name">EcoDom</h1>
+            <div id="loginStatus" style="display:none; padding:15px; border-radius:12px; margin-bottom:20px; background:#4CAF50; color:white;">
+                <span data-key="login.auth">Авторизация...</span>
+            </div>
+            <div id="errorMessage" class="error-message"></div>
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="rpi_id" data-key="login.rpi_id">ID Raspberry Pi</label>
+                    <input type="text" id="rpi_id" required autocomplete="off" data-key-placeholder="login.rpi_placeholder">
+                </div>
+                <div class="input-group">
+                    <label for="password" data-key="login.password">Пароль</label>
+                    <input type="password" id="password" required autocomplete="current-password" data-key-placeholder="login.password_placeholder">
+                </div>
+                <button type="submit" id="loginButton" data-key="login.button">Войти</button>
+            </form>
+            
+            <div class="temp-access">
+                <p data-key="login.no_credentials">Нет учетных данных? Продолжите без входа (демо-режим)</p>
+                <button id="tempAccessBtn" class="secondary" data-key="login.continue_without">Продолжить без входа</button>
+            </div>
+            
+            <div class="login-footer">
+                <p data-key="login.instructions">Используйте заводские логин и пароль с наклейки на Raspberry Pi, после входа вы сможете сменить пароль в настройках</p>
+            </div>
+            <p data-key="login.agreement">Используя сайт, вы соглашаетесь на сбор метаданных.</p>
         </div>
     </div>
 
-    <script>
-        function setStatus(message, type = 'info') {
-            const statusDiv = document.getElementById('status');
-            statusDiv.innerHTML = message;
-            statusDiv.className = type;
-        }
+    <!-- Общий менеджер языков -->
+    <script src="language-manager.js"></script>
 
-        async function sendMessage() {
-            const messageInput = document.getElementById('messageInput');
-            const message = messageInput.value.trim();
+<script>
+// Основной код страницы входа с использованием общего менеджера языков
+document.addEventListener('DOMContentLoaded', function() {
+    // Получаем экземпляр менеджера языков
+    const langManager = window.languageManager;
+    
+    // Обработчик временного доступа
+    const tempAccessBtn = document.getElementById('tempAccessBtn');
+    if (tempAccessBtn) {
+        tempAccessBtn.addEventListener('click', function() {
+            localStorage.setItem('tempAccess', 'true');
+            localStorage.removeItem('authToken');
+            window.location.href = 'index.html';
+        });
+    }
+    
+    // Обработчик формы входа
+    const loginForm = document.getElementById('loginForm');
+    const loginButton = document.getElementById('loginButton');
+    const errorDiv = document.getElementById('errorMessage');
+    
+    if (loginForm) {
+        const handleLogin = async function(e) {
+            if (e) e.preventDefault();
             
-            if (!message) {
-                setStatus('⚠️ Пожалуйста, введите сообщение', 'error');
+            loginButton.disabled = true;
+            loginButton.textContent = langManager.get('login.auth');
+            
+            const rpiIdInput = document.getElementById('rpi_id').value.trim();
+            const password = document.getElementById('password').value;
+            
+            if (!rpiIdInput || !password) {
+                showError(langManager.get('login.error.fill_fields'));
+                resetLoginButton();
                 return;
             }
             
-            setStatus('⏳ Отправка...', 'info');
+            showError(langManager.get('login.error.auth'));
             
             try {
-                const baseUrl = window.location.origin;
-                const response = await fetch(`${baseUrl}/send-message`, {
+                const response = await fetch('/api/login', {
                     method: 'POST',
-                    headers: {
+                    headers: { 
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ message })
+                    body: JSON.stringify({ 
+                        rpi_id: rpiIdInput,
+                        password: password
+                    })
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    let errorMsg = `Ошибка сервера: ${response.status}`;
+                    
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || errorMsg;
+                    } catch (parseError) {
+                        if (response.status === 500) {
+                            errorMsg = langManager.get('login.error.server_error');
+                        } else if (response.status === 404) {
+                            errorMsg = langManager.get('login.error.device_not_found');
+                        } else if (response.status === 401) {
+                            errorMsg = langManager.get('login.error.wrong_password');
+                        } else if (response.status === 400) {
+                            errorMsg = langManager.get('login.error.bad_request');
+                        }
+                    }
+                    
+                    showError(errorMsg);
+                    resetLoginButton();
+                    return;
                 }
                 
-                const result = await response.json();
+                const data = await response.json();
                 
-                if (result.success) {
-                    setStatus('✅ Сообщение успешно отправлено в Telegram!', 'success');
-                    messageInput.value = '';
+                if (data.status === "success" && data.token) {
+                    localStorage.setItem('authToken', data.token); // 
+                    localStorage.setItem('rpiId', data.rpi_id || rpiIdInput);
+                    localStorage.setItem('tg_password', password);              // хеш надо ------------------------------------------------------------
+                    localStorage.removeItem('tempAccess');
+                    window.location.href = 'index.html';
                 } else {
-                    throw new Error(result.error || 'Неизвестная ошибка');
+                    showError(data.error || 'Неизвестная ошибка авторизации');
+                    resetLoginButton();
                 }
+                
             } catch (error) {
-                console.error('Ошибка:', error);
-                setStatus(`❌ Ошибка отправки: ${error.message}`, 'error');
+                console.error('Login error:', error);
+                showError(langManager.get('login.error.server'));
+                resetLoginButton();
+            }
+        };
+
+        function showError(message) {
+            if (errorDiv) {
+                errorDiv.textContent = message;
+                errorDiv.style.display = "block";
+                errorDiv.style.background = "#f44336";
+                errorDiv.style.color = "white";
+                errorDiv.style.padding = "10px";
+                errorDiv.style.borderRadius = "5px";
+                errorDiv.style.marginBottom = "15px";
             }
         }
-
-        function sendQuickMessage(message) {
-            document.getElementById('messageInput').value = message;
-            sendMessage();
-        }
-
-        // Отправка по Enter
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
+        
+        function resetLoginButton() {
+            if (loginButton) {
+                loginButton.disabled = false;
+                loginButton.textContent = langManager.get('login.button');
             }
+        }
+        
+        loginForm.addEventListener('submit', handleLogin);
+        
+        // Автоматический вызов при нажатии Enter
+        document.getElementById('rpi_id').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleLogin(e);
         });
-
-        // Фокус на поле ввода при загрузке
-        document.getElementById('messageInput').focus();
-    </script>
+        
+        document.getElementById('password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleLogin(e);
+        });
+    }
+});
+</script>
 </body>
 </html>
