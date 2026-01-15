@@ -1,8 +1,8 @@
 # FTP
-$FtpHost = "185.98.5.149"
+$FtpHost = ""
 $FtpPort = "21"  # 21
-$FtpUser = "ecodom_asia"
-$FtpPass = "Dioptriy0"
+$FtpUser = ""
+$FtpPass = ""
 
 # Local file and destination path
 $LocalFile2 = "C:\diasprogi\p\s\camera1\final2\app.js"
