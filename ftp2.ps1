@@ -1,7 +1,7 @@
-$FtpHost = "185.98.5.149"
+$FtpHost = ""
 $FtpPort = "21"  # 21
-$FtpUser = "ecodom_asia"
-$FtpPass = "Dioptriy0"
+$FtpUser = ""
+$FtpPass = ""
 $FilesToUpload = @(
     @{
         LocalFile  = "C:\diasprogi\p\s\camera1\final2\login.html"
@@ -88,9 +88,9 @@ if ($SuccessCount -eq $TotalFiles) {
 
 Start-Sleep -Seconds 1
 
-# $RpiIP = "100.73.130.72"  # Замени на текущий IP RPi
-# $User = "dias"
-# $Password = "2004"  # Замени на реальный пароль
+# $RpiIP = ""
+# $User = ""
+# $Password = "" 
 # try {    
 #     $SecurePass = ConvertTo-SecureString $Password -AsPlainText -Force # 4. Подключаемся по SSH
 #     $Credential = New-Object System.Management.Automation.PSCredential ($User, $SecurePass)
