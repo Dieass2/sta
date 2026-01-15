@@ -1,816 +1,964 @@
-// Отключение конфликтующих расширений
+
 if (typeof window.ethereum !== 'undefined') {
     window.ethereum.autoRefreshOnNetworkChange = false;
 }
 
-// Используем относительные пути для API
 window.API_BASE = '';
 
-const safeElement = (id) => {
-  const el = document.getElementById(id);
-  if (!el) console.error(`Element not found: ${id}`);
-  return el;
-};
-
-function updateTelegramLink() {
-    const telegramBtn = document.getElementById('telegramButton');
-    if (!telegramBtn) return;
-    
-    const login = sessionStorage.getItem('tg_login');
-    const password = sessionStorage.getItem('tg_password');
-    
-    if (login && password) {
-        telegramBtn.href = `https://t.me/DataCybSec_bot?start=${encodeURIComponent(login + '_' + password)}`;
-    } else {
-        telegramBtn.style.display = 'none';
-    }
-    if (localStorage.getItem('tempAccess') === 'true') {
-        telegramBtn.href = "https://t.me/DataCybSec_bot?start";
+// Вспомогательная функция для безопасного обновления текста в DOM
+function safeUpdate(id, value, transform = null) {
+    const el = document.getElementById(id);
+    if (el) {
+        let displayValue = value;
+        if (value === undefined || value === null) {
+            displayValue = '--';
+        } else if (typeof value === 'number') {
+            displayValue = parseFloat(value.toFixed(2)).toString();
+        } else if (transform) {
+            displayValue = transform(displayValue); 
+        }
+        el.textContent = displayValue;
     }
 }
 
-// Основной код приложения
 document.addEventListener('DOMContentLoaded', function() {
     let historyChart = null;
-    let cameraUpdateIntervals = {};
-    let socket = null;
-    const camerasContainer = safeElement('camerasContainer');
-    const lightingControls = safeElement('lightingControls');
+    const langManager = window.languageManager;
+    
+    const PUBLIC_VAPID_KEY = 'BJ9I-5...'; 
+    let overlayInterval = null;
 
-    // Функция безопасного обновления UI
-    function safeUpdate(id, value, transform = null) {
-        const el = safeElement(id);
-        if (el) {
-            let displayValue = value;
-            
-            if (value === undefined || value === null) {
-                displayValue = '--';
-            } 
-            // Форматирование чисел
-            else if (typeof value === 'number') {
-                // Округляем до 2 знаков и удаляем лишние нули
-                displayValue = parseFloat(value.toFixed(2)).toString();
-            }
-            // Пользовательские преобразования
-            else if (transform) {
-                displayValue = transform(displayValue);
-            }
-            
-            el.textContent = displayValue;
-        }
-    }
-
-    // Проверка демо-режима
-    const demoWarning = safeElement('demoWarning');
-    if (demoWarning) {
-        demoWarning.style.display = localStorage.getItem('authToken') 
-            ? 'none' 
-            : (localStorage.getItem('tempAccess') ? 'block' : 'none');
-    }
-
+    
+    // Переменные доступа
     const authToken = localStorage.getItem('authToken') || '';
     const rpiId = localStorage.getItem('rpiId') || '';
     const isTempAccess = localStorage.getItem('tempAccess') === 'true';
+
+    // Элементы DOM
+    const camerasContainer = document.getElementById('camerasContainer');
+    const overlay = document.getElementById('deviceOverlay');
+    const demoWarning = document.getElementById('demoWarning');
+
+    // Проверка авторизации
+    if (demoWarning) {
+        demoWarning.style.display = authToken ? 'none' : (isTempAccess ? 'block' : 'none');
+    }
     
-    if (!rpiId || rpiId === 'unknown') {
-        console.error('RPI ID not found. Redirecting to login...');
+    if (!isTempAccess && !authToken && !rpiId) {
         window.location.href = 'login.html';
         return;
     }
-    
-    // Обновление карточек устройств
-    async function updateDeviceCards() {
-        if (!camerasContainer || !lightingControls) {
-            console.error('Containers not found');
-            return;
-        }
-        if (this.isUpdating) return;
-        this.isUpdating = true;
-        
-        Object.values(cameraUpdateIntervals).forEach(clearInterval);
-        cameraUpdateIntervals = {};
-        
-        // Полностью очистить контейнеры
-        camerasContainer.innerHTML = '';
-        lightingControls.innerHTML = '';
+    const settingsMap = {
+        'awayScenario': 'away_mode',
+        'coNotifications': 'co2_alert',
+        'motionNotifications': 'pir_alert',
+        'energyNotifications': 'power_alert'
+    };
+
+    // Загрузка состояния слайдеров с сервера
+    async function loadUserSettings() {
+        if (!rpiId || isTempAccess) return;
 
         try {
-            const response = await fetch(`/api/devices?rpi_id=${rpiId}`, {
-                headers: { 
-                    'Authorization': `Bearer ${authToken}`
-                }
-            });
+            const response = await fetch(`/api/user/settings?rpi_id=${encodeURIComponent(rpiId)}`);
+            if (!response.ok) return;
+            const settings = await response.json();
 
-            if (!response.ok) throw new Error('Ошибка загрузки устройств');
-            const devices = await response.json();
-            
-            // Собираем новые устройства
-            const cameraCards = [];
-            const lightCards = [];
-            
-            devices.forEach(device => {
-                if (!device.id) return;
-                
-                if (device.role === 'camera') {
-                    cameraCards.push(`
-                        <div class="camera-feed" data-device-id="${device.id}">
-                            <h2>Камера ${device.id}</h2>
-                            <button class="btn-record" data-device-id="${device.id}">
-                                Запись (60 сек)
-                            </button>
-                        </div>
-                    `);
-                } else if (device.role === 'flashlight') {
-                    lightCards.push(`
-                        <div class="control-card" data-device-id="${device.id}">
-                            <h3>Свет ${device.id}</h3>
-                            <button class="btn-flashlight ${device.flashlight_active ? 'active' : ''}" 
-                                    data-device-id="${device.id}">
-                                ${device.flashlight_active ? 'Выключить' : 'Включить'}
-                            </button>
-                        </div>
-                    `);
-                }
-            });
-            
-            // Добавляем карточки в контейнеры
-            camerasContainer.innerHTML = cameraCards.join('');
-            lightingControls.innerHTML = lightCards.join('');
-            
-            // Добавить обработчики событий
-            document.querySelectorAll('.btn-record').forEach(button => {
-                button.addEventListener('click', function() {
-                    const deviceId = this.dataset.deviceId;
-                    sendDeviceCommand(deviceId, 'record_video', 60);
-                });
-            });
-            
-            document.querySelectorAll('.btn-flashlight').forEach(button => {
-                button.addEventListener('click', function() {
-                    const deviceId = this.dataset.deviceId;
-                    const isActive = this.classList.contains('active');
-                    sendDeviceCommand(deviceId, 'flashlight', !isActive);
-                });
-            });
-        } catch (error) {
-            console.error('Device cards error:', error);
-        } finally {
-            this.isUpdating = false;
-        }
-    }
-    
-    // Подключение WebSocket
-    if (rpiId) {
-        try {
-            socket = io({
-                transports: ['websocket', 'polling'],
-                reconnection: true,
-                reconnectionAttempts: 5,
-                reconnectionDelay: 3000
-            });
+            // Устанавливаем состояния чекбоксов
+            setSwitchState('awayScenario', settings.away_mode);
+            setSwitchState('coNotifications', settings.co2_alert);
+            setSwitchState('motionNotifications', settings.pir_alert);
+            setSwitchState('energyNotifications', settings.power_alert);
 
-            // После подключения присоединяемся к комнате
-            socket.on('connect', () => {
-                console.log('Socket connected');
-                socket.emit('join', { rpi_id: rpiId });
-            });
-        } catch (error) {
-            console.error('Socket connection error:', error);
-        }
-    }
-    
-    const activeTab = localStorage.getItem('activeTab');
-    if (activeTab) {
-        setTimeout(() => {
-            document.querySelector(`.tab-btn[data-tab="${activeTab}"]`)?.click();
-        }, 100);
-    } else {
-        setTimeout(() => {
-            document.querySelector('.tab-btn[data-tab="dashboard"]')?.click();
-        }, 100);
-    }
-    updateTelegramLink();
-    
-    // Обновление статуса RPi
-    function updateRpiStatus(status, isError = false) {
-        const statusIcon = safeElement('statusIcon');
-        const statusText = safeElement('statusText');
-        
-        if (statusText) statusText.textContent = status;
-        if (statusIcon) {
-            statusIcon.style.color = isError ? 'var(--danger)' : 'var(--primary)';
-            statusIcon.className = isError ? 'offline' : 'online';
+        } catch (e) { 
+            console.error('Settings load error:', e); 
         }
     }
 
-    // Управление уведомлениями
-    function updateNotificationSetting(setting, value) {
-        if (!authToken) return;
-        
-        fetch(`/api/device/command`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({
-                command: "update_notification",
-                setting: setting,
-                value: value,
-                rpi_id: rpiId
-            })
-        })
-        .catch(error => console.error('Notification update error:', error));
+    function setSwitchState(id, state) {
+        const el = document.getElementById(id);
+        if (el) el.checked = state;
     }
 
-    function setupNotificationHandlers() {
-        const setupHandler = (id, settingName) => {
-            const element = safeElement(id);
-            if (element) {
-                element.addEventListener('change', (e) => {
-                    if (!localStorage.getItem('authToken')) {
-                        alert('Для изменения настроек войдите в систему');
-                        e.target.checked = !e.target.checked;
+    // Инициализация слушателей изменений (отправка на сервер)
+    function initSettingsListeners() {
+        Object.keys(settingsMap).forEach(elementId => {
+            const el = document.getElementById(elementId);
+            if (el) {
+                el.addEventListener('change', async (e) => {
+                    if (isTempAccess) {
+                        alert("В демо-режиме настройки не сохраняются");
+                        e.target.checked = !e.target.checked; // Возврат
                         return;
                     }
-                    updateNotificationSetting(settingName, e.target.checked);
+                    try {
+                        await fetch('/api/user/settings', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                rpi_id: rpiId,
+                                setting: settingsMap[elementId],
+                                value: e.target.checked
+                            })
+                        });
+                        console.log(`Setting ${settingsMap[elementId]} saved: ${e.target.checked}`);
+                    } catch (err) {
+                        console.error('Save setting error', err);
+                        // Возвращаем переключатель назад при ошибке
+                        e.target.checked = !e.target.checked; 
+                    }
                 });
             }
-        };
-
-        setupHandler('coNotifications', 'co2_alert');
-        setupHandler('motionNotifications', 'pir_alert');
-        setupHandler('energyNotifications', 'power_alert');
+        });
     }
 
-    // Отправка команд устройствам
-    async function sendDeviceCommand(deviceId, command, value) {
-        if (isTempAccess || !authToken) {
-            console.log('Skipping command in demo mode');
-            return false;
-        }
+
+    // ==========================================
+    // 2. ФУНКЦИИ УСТРОЙСТВ (СПИСОК)
+    // ==========================================
+
+    async function loadDevices() {
+        if(!camerasContainer) return;
         
         try {
-            const response = await fetch(`/api/device/command`, {
+            // Загружаем телефоны и IP-камеры параллельно
+            const [devRes, ipCamRes] = await Promise.all([
+                fetch(`/api/devices?rpi_id=${encodeURIComponent(rpiId)}`),
+                fetch(`/api/ip-cameras?rpi_id=${encodeURIComponent(rpiId)}`)
+            ]);
+
+            const devData = await devRes.json();
+            const ipCams = await ipCamRes.json();
+
+            // Обновляем статистику (только по телефонам, так как RTSP статус сложно чекать быстро)
+            if(devData.stats) {
+                safeUpdate('totalDevices', devData.stats.total + ipCams.length);
+                safeUpdate('onlineDevices', devData.stats.online + ipCams.length); // Считаем IP камеры всегда онлайн
+            }
+
+            // Рендерим всё в одну кучу
+            let html = '';
+            
+            // 1. Телефоны
+            if (devData.devices) {
+                html += devData.devices.map(d => createDeviceCardHTML(d, 'phone')).join('');
+            }
+            
+            // 2. RTSP Камеры
+            if (ipCams) {
+                html += ipCams.map(c => createDeviceCardHTML(c, 'rtsp')).join('');
+            }
+
+            camerasContainer.innerHTML = html || '<div style="text-align:center; padding:20px;">Нет устройств</div>';
+
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    function createDeviceCardHTML(device, type) {
+        if (type === 'phone') {
+            const batteryLevel = parseInt(device.battery_level || 0);
+            const isCharging = device.is_charging === 'true';
+            const batteryClass = batteryLevel <= 20 ? 'bat-low' : (batteryLevel <= 50 ? 'bat-med' : 'bat-high');
+            const lastSeenText = device.is_online ? 'Сейчас' : formatLastSeen(device.last_seen_seconds);
+            const displayName = (device.os && device.os !== 'Unknown') ? device.os : `Камера ${device.token.substr(0,4)}...`;
+
+            return `
+            <div class="device-card ${device.is_online ? 'online' : 'offline'}">
+                <div class="device-card-header">
+                    <span class="device-name">${displayName}</span>
+                    <span class="device-badge ${device.is_online ? 'badge-online' : 'badge-offline'}">
+                        ${device.is_online ? 'ON' : 'OFF'}
+                    </span>
+                </div>
+                <div class="device-card-body">
+                    <div class="battery-container">
+                        <div class="info-row"><small>Батарея: ${batteryLevel}%</small></div>
+                        <div class="battery-track"><div class="battery-fill ${batteryClass}" style="width: ${batteryLevel}%"></div></div>
+                    </div>
+                    <div style="font-size: 0.8rem; text-align: right;">Активность: ${lastSeenText}</div>
+                </div>
+                <div class="device-card-footer">
+                    <button class="btn btn-primary" onclick="window.openDeviceOverlay('${device.token}', 'phone')">Просмотр</button>
+                    <button class="btn btn-danger" onclick="window.deleteDevice('${device.token}')">🗑️</button>
+                </div>
+            </div>`;
+        } 
+        else if (type === 'rtsp') {
+            return `
+            <div class="device-card online" style="border-left-color: #9C27B0;">
+                <div class="device-card-header">
+                    <span class="device-name">${device.name}</span>
+                    <span class="device-badge badge-online">RTSP</span>
+                </div>
+                <div class="device-card-body">
+                    <div class="info-row"><small style="color:var(--text-secondary)">${device.rtsp_full.substr(0, 25)}...</small></div>
+                    <div style="font-size: 0.8rem; margin-top: 10px;">IP Камера (Всегда вкл)</div>
+                </div>
+                <div class="device-card-footer">
+                    <button class="btn btn-primary" onclick="window.openDeviceOverlay('${device.id}', 'rtsp')">Просмотр</button>
+                    <button class="btn btn-danger" onclick="window.deleteIpCam('${device.id}')">🗑️</button>
+                </div>
+            </div>`;
+        }
+    }
+
+
+    function formatLastSeen(seconds) {
+        if (!seconds && seconds !== 0) return 'Давно';
+        if (seconds < 60) return `${seconds} сек. назад`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)} мин. назад`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)} ч. назад`;
+        return `${Math.floor(seconds / 86400)} дн. назад`;
+    }
+
+    
+    let currentOverlayToken = null;
+
+   
+
+    let currentOverlayType = null; // 'phone' или 'rtsp'
+
+
+    // 2. Обновите функцию sendDeviceAction
+    window.sendDeviceAction = async function(action) {
+        if (!currentOverlayToken) return;
+        
+        let value = 0;
+        const seconds = document.getElementById('recordSeconds').value || 10;
+
+         if (currentOverlayType === 'phone') {
+             // Если команда record - берем секунды, если фонарик - переключаем (toggle)
+             if (action === 'record') {
+                 const input = document.getElementById('recordSeconds');
+            value = input ? input.value : 10;
+        } else if (action === 'flashlight') {
+            value = 'toggle'; // Значение для переключения
+        }
+
+        try {
+            const res = await fetch('/api/device/command', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
-                },
-                body: JSON.stringify({ 
-                    device_id: deviceId,
-                    command,
-                    value,
-                    rpi_id: rpiId
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    device_id: currentOverlayToken,
+                    command: action,
+                    value: value
                 })
             });
             
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Command failed');
+            if (res.ok) {
+                // Не показываем алерт на каждое нажатие фонарика, чтобы не бесило
+                console.log('Команда отправлена:', action);
+                // if (action !== 'flashlight') alert(`Команда "${action}" отправлена!`);
+            } else {
+                alert('Ошибка отправки');
             }
+        } catch (e) { console.error(e); }
+    } else if (currentOverlayType === 'rtsp') {
+          if (action === 'record') {
+                try {
+                    await fetch('/api/ip-camera/record', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ id: currentOverlayToken, seconds: seconds })
+                    });
+                    console.log('Запись IP камеры началась');
+                } catch(e) { alert('Ошибка'); }
+            } else if (action === 'stop_record') {
+                alert('Для IP камер стоп происходит автоматически по таймеру (ffmpeg kill не реализован в этой версии)');
+            }
+        }
+    };
+
+
+    async function loadOverlayVideos(token) {
+        try {
+            const vidResponse = await fetch(`/api/device/videos/${token}?rpi_id=${encodeURIComponent(rpiId)}`);
+            const videos = await vidResponse.json();
             
-            return true;
-        } catch (error) {
-            console.error('Command error:', error);
-            return false;
+            const listContainer = document.getElementById('overlayVideosList');
+            if(videos.length === 0) {
+                listContainer.innerHTML = '<p style="text-align:center; padding:10px;">Нет записей</p>';
+            } else {
+                listContainer.innerHTML = videos.map(video => `
+                    <div class="video-item">
+                        <div class="video-info">
+                            <div>${video.name}</div>
+                            <div class="video-meta">${formatFileSize(video.size)} • ${new Date(video.date).toLocaleString()}</div>
+                        </div>
+                        <div class="video-actions">
+                            <button class="btn btn-primary" onclick="window.playOverlayVideo('${token}', '${video.name}')">▶</button>
+                            <button class="btn btn-primary" onclick="window.downloadVideo('${token}', '${video.name}')">⬇</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch(e) {
+            document.getElementById('overlayVideosList').innerHTML = 'Ошибка загрузки видео';
         }
     }
 
-    // Загрузка списка устройств для вкладки настроек
-    async function loadDevicesList() {
-        try {
-            const tbody = document.querySelector('#devicesTable tbody');
-            if (!tbody) return;
-            
-            const response = await fetch(`/api/devices?rpi_id=${rpiId}`, {
-                headers: { 
-                    'Authorization': `Bearer ${authToken}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const devices = await response.json();
-            
-            tbody.innerHTML = devices.map(device => `
-                <tr>
-                    <td>${device.id}</td>
-                    <td>${device.role}</td>
-                    <td>${device.is_online ? 'Онлайн' : 'Оффлайн'}</td>
-                    <td>${device.last_seen ? new Date(device.last_seen).toLocaleString() : 'Нет данных'}</td>
-                    <td>
-                        <button class="btn-delete" data-device-id="${device.id}">Удалить</button>
-                    </td>
-                </tr>
-            `).join('');
+    
 
-            // Добавляем обработчики ПОСЛЕ вставки в DOM
-            tbody.querySelectorAll('.btn-delete').forEach(button => {
-                button.addEventListener('click', async function() {
-                    const deviceId = this.dataset.deviceId;
-                    if (!confirm(`Удалить устройство ${deviceId}?`)) return;
-                    try {
-                        const response = await fetch(`/api/device/${deviceId}`, {
-                            method: 'DELETE',
-                            headers: {
-                                'Authorization': `Bearer ${authToken}`
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+
+    async function loadIpCameras() {
+        const listDiv = document.getElementById('ipCamList');
+        if (!listDiv || !rpiId) return;
+
+        try {
+            const res = await fetch(`/api/ip-cameras?rpi_id=${encodeURIComponent(rpiId)}`);
+            const cams = await res.json();
+
+            if (cams.length === 0) {
+                listDiv.innerHTML = '<p style="color:#666">Нет подключенных камер</p>';
+                return;
+            }
+
+            listDiv.innerHTML = cams.map(cam => `
+                   <div class="video-item" style="margin-bottom: 10px;">
+                    <div class="video-info">
+                        <strong>${cam.name}</strong><br>
+                        <small title="${cam.rtsp_full}">${cam.rtsp_full.substr(0, 30)}...</small>
+                    </div>
+                    <div class="video-actions">
+                        <!-- ВАЖНО: Теперь вызываем openDeviceOverlay с типом 'rtsp' -->
+                        <button class="btn btn-success" style="background:var(--primary); color:white;" onclick="window.openDeviceOverlay('${cam.id}', 'rtsp')">▶ Play</button>
+                        <button class="btn btn-danger" onclick="window.deleteIpCam('${cam.id}')">🗑</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) { console.error(e); }
+    }
+
+
+
+    let jsmpegPlayer = null;
+    
+    
+    
+    let hlsInstance = null;
+
+
+    window.openDeviceOverlay = async function(id, type) {
+        currentOverlayToken = id;
+        currentOverlayType = type;
+        
+        const overlay = document.getElementById('deviceOverlay');
+        const playerContainer = document.getElementById('overlayPlayerContainer');
+        const controlsPanel = document.getElementById('overlayControlsPanel');
+        const detailsEl = document.getElementById('overlayDetails');
+        
+        // 1. Показываем оверлей
+        overlay.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+        
+        // 2. Сброс всего
+        if (overlayInterval) clearInterval(overlayInterval);
+        
+        // Возвращаем чистый видео-тег перед началом (на случай если он был удален)
+        playerContainer.innerHTML = '<video id="overlayVideo" style="width:100%; max-height:60vh; background:#000;" controls playsinline muted></video>';
+        const videoEl = document.getElementById('overlayVideo');
+        
+        playerContainer.style.display = 'none';
+
+        if (type === 'rtsp') {
+            document.getElementById('overlayTitle').textContent = "IP Камера";
+            detailsEl.innerHTML = '<div style="text-align:center">📡 Подключение...</div>';
+            
+            playerContainer.style.display = 'block';
+            if (controlsPanel) controlsPanel.style.display = 'block';
+            if (document.getElementById('overlayFlashBtn')) document.getElementById('overlayFlashBtn').style.display = 'none';
+
+            const showOfflineVideo = () => {
+                console.log("⚠️ Включаем заглушку (Пересоздание плеера)");
+                
+                // 1. Уничтожаем HLS
+                if (hlsInstance) {
+                    hlsInstance.destroy();
+                    hlsInstance = null;
+                }
+
+                // Добавляем ?t=... для сброса кэша
+                const videoUrl = '/api/video/offline?t=' + Date.now();
+                
+                playerContainer.innerHTML = `
+                    <video id="overlayVideo" 
+                           src="${videoUrl}" 
+                           style="width:100%; max-height:60vh; background:#000;" 
+                           controls 
+                           playsinline 
+                           muted 
+                           autoplay 
+                           loop>
+                    </video>
+                    <div style="text-align:center; padding:10px; color:white;">
+                        <button class="btn btn-primary" onclick="document.getElementById('overlayVideo').play()">▶ Запустить видео</button>
+                    </div>
+                `;
+                
+                detailsEl.innerHTML = `
+                    <div class="detail-item" style="color:red"><strong>Статус</strong> Нет сигнала</div>
+                    <div class="detail-item">Порт 554 закрыт или камера недоступна</div>
+                `;
+            };
+
+            try {
+                const res = await fetch('/api/hls/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id: id })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    if (Hls.isSupported()) {
+                        hlsInstance = new Hls({
+                            manifestLoadingTimeOut: 4000, 
+                            manifestLoadingMaxRetry: 2,
+                            manifestLoadingRetryDelay: 500
+                        });
+                        
+                        hlsInstance.loadSource(data.url);
+                        hlsInstance.attachMedia(videoEl);
+                        
+                        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                            detailsEl.innerHTML = '<div style="color:#4CAF50">🟢 Онлайн</div>';
+                            if(watchdogTimer) clearTimeout(watchdogTimer); // Видео пошло, таймер не нуже
+                            videoEl.play().catch(e => console.log("Autoplay blocked"));
+                        });
+
+                        hlsInstance.on(Hls.Events.ERROR, function (event, data) {
+                            if (data.fatal) {
+                                console.log("❌ Ошибка HLS:", data.type);
+                                showOfflineVideo();
                             }
                         });
                         
-                        if (response.ok) {
-                            loadDevicesList();
-                        } else {
-                            const errorData = await response.json();
-                            alert(`Ошибка: ${errorData.error || 'Неизвестная ошибка'}`);
-                        }
-                    } catch (error) {
-                        console.error('Delete error:', error);
-                        alert('Ошибка сети');
-                    }
-                });
-            });
-            
-        } catch (error) {
-            console.error('Load devices error:', error);
-            const tbody = document.querySelector('#devicesTable tbody');
-            if (tbody) tbody.innerHTML = '<tr><td colspan="5">Ошибка загрузки устройств</td></tr>';
-        }
-    }
+                        setTimeout(() => {
+                            const currentVid = document.getElementById('overlayVideo');
+                            if (currentVid && (currentVid.paused || currentVid.currentTime < 0.1)) {
+                                showOfflineVideo();
+                            }
+                        }, 20000);
 
-    // Загрузка истории данных
-    async function loadHistory() {
-        const historyChartCtx = safeElement('historyChart')?.getContext('2d');
-        const historySensor = safeElement('historySensor');
-        const historyRange = safeElement('historyRange');
-        
-        if (!rpiId || !historyChartCtx || !historySensor || !historyRange) return;
-        
-        if (historyChart) {
-            historyChart.destroy();
-            historyChart = null;
-        }
-        
-        const sensor = historySensor.value;
-        const range = parseInt(historyRange.value);
-        
-        try {
-            const response = await fetch(`/api/history?sensor=${sensor}&days=${range}&rpi_id=${rpiId}`);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Ошибка ${response.status}: ${errorText || 'Неизвестная ошибка'}`);
+                    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                        // Safari
+                        videoEl.src = data.url;
+                        videoEl.play();
+                    }
+                } else {
+                    showOfflineVideo();
+                }
+            } catch (e) {
+                console.error(e);
+                showOfflineVideo();
             }
             
+            if(typeof loadOverlayVideos === 'function') loadOverlayVideos(id, 'rtsp');
+        } 
+        
+        else {
+            document.getElementById('overlayTitle').textContent = `ID: ${id}`;
+            playerContainer.style.display = 'none';
+            
+            const updateOverlayData = async () => {
+                if (overlay.style.display === 'none') return;
+                try {
+                    const rpiId = localStorage.getItem('rpiId');
+                    const devResponse = await fetch(`/api/devices?rpi_id=${encodeURIComponent(rpiId)}`);
+                    const devData = await devResponse.json();
+                    const device = devData.devices.find(d => d.token === id);
+                    if (device) {
+                        // ... обновление интерфейса ...
+                         document.getElementById('overlayDetails').innerHTML = `
+                            <div class="detail-item"><strong>ОС</strong> ${device.os || 'N/A'}</div>
+                            <div class="detail-item"><strong>Токен</strong> ${device.token}</div>
+                            <div class="detail-item"><strong>Статус</strong> ${device.is_online ? '🟢 Онлайн' : '🔴 Офлайн'}</div>
+                            <div class="detail-item"><strong>Батарея</strong> ${device.battery_level}%</div>
+                        `;
+                    }
+                } catch(e){}
+            };
+            await updateOverlayData();
+            overlayInterval = setInterval(updateOverlayData, 2000);
+            if(typeof loadOverlayVideos === 'function') loadOverlayVideos(id, 'phone');
+        }
+    };
+    
+    
+
+    window.closeDeviceOverlay = function() {
+        const overlay = document.getElementById('deviceOverlay');
+        const videoEl = document.getElementById('overlayVideo');
+        
+        overlay.style.display = 'none';
+        document.body.style.overflow = '';
+        
+        videoEl.pause();
+        videoEl.removeAttribute('src');
+        videoEl.load();
+
+        if (hlsInstance) {
+            hlsInstance.destroy();
+            hlsInstance = null;
+        }
+        
+        if (overlayInterval) {
+            clearInterval(overlayInterval);
+            overlayInterval = null;
+        }
+        const pc = document.getElementById('overlayPlayerContainer');
+        if(pc) pc.innerHTML = ''; // Чистим плеер
+
+        currentOverlayToken = null;
+    };
+
+
+
+    
+    
+    
+    
+    
+    // Обработчик формы
+    const camForm = document.getElementById('ipCamForm');
+    if (camForm) {
+        camForm.addEventListener('submit', async (e) => {
+            e.preventDefault(); // Предотвращаем перезагрузку
+             if (isTempAccess) return alert('Демо режим');
+
+            const body = {
+                rpi_id: rpiId,
+                name: document.getElementById('camName').value,
+                rtsp_full: document.getElementById('camLink').value // Берем готовую ссылку
+            };
+
+            try {
+                await fetch('/api/ip-cameras', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                camForm.reset();
+                loadIpCameras();
+                console.log('Камера добавлена');
+            } catch (e) { alert('Ошибка'); }
+        });
+    }
+
+    // Удаление (сделать глобальным, чтобы вызывать из HTML)
+    window.deleteIpCam = async (id) => {
+        if (!confirm('Удалить камеру?')) return;
+        try {
+            await fetch(`/api/ip-cameras/${id}`, { method: 'DELETE' });
+            loadIpCameras();
+        } catch (e) { alert('Ошибка'); }
+    };
+
+
+
+
+// Привязка кнопки
+const enableFCMBtn = document.getElementById('enableFCM');
+if (enableFCMBtn) {
+    enableFCMBtn.addEventListener('click', async () => {
+        if (!('serviceWorker' in navigator)) return alert('Нет поддержки SW');
+
+        try {
+            enableFCMBtn.disabled = true;
+            enableFCMBtn.textContent = "Настройка...";
+            
+            // 1. Получаем ключ
+            const response = await fetch('/api/push/key');
+            if (!response.ok) throw new Error('Не удалось получить ключ с сервера');
             const data = await response.json();
             
-            if (!data.labels || !data.values) {
-                throw new Error('Некорректный формат данных истории');
+            // Проверка ключа
+            if (!data.publicKey || data.publicKey.length < 10) {
+                throw new Error('Некорректный VAPID ключ на сервере');
             }
             
-            historyChart = new Chart(historyChartCtx, {
-                type: 'line',
-                data: {
-                    labels: data.labels,
-                    datasets: [{
-                        label: historySensor.options[historySensor.selectedIndex].text,
-                        data: data.values,
-                        borderColor: '#4CAF50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        tension: 0.1,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: false } }
-                }
+            const applicationServerKey = urlBase64ToUint8Array(data.publicKey);
+
+            // 2. Удаляем старые регистрации (чтобы исправить ошибку)
+            const oldRegs = await navigator.serviceWorker.getRegistrations();
+            for (let reg of oldRegs) {
+                await reg.unregister();
+            }
+
+            // 3. Регистрируем заново
+            const register = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+            await navigator.serviceWorker.ready; // Ждем активации
+
+            // 4. Подписываемся
+            console.log('Subscribing with key:', data.publicKey);
+            const subscription = await register.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: applicationServerKey
             });
+
+            // 5. Отправляем на сервер
+            await fetch('/api/subscribe', {
+                method: 'POST',
+                body: JSON.stringify({
+                    rpi_id: localStorage.getItem('rpiId'),
+                    subscription: subscription
+                }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            alert('Уведомления успешно включены!');
+            enableFCMBtn.textContent = "Уведомления активны ✅";
+
+        } catch (e) {
+            console.error("Push Error:", e);
+            alert('Ошибка подписки: ' + e.message + '\nПроверьте VAPID ключи в app.js!');
+            enableFCMBtn.disabled = false;
+            enableFCMBtn.textContent = "Попробовать снова";
+        }
+    });
+}
+
+
+
+
+
+
+
+
+
+    window.playOverlayVideo = async function(token, filename) {
+        const playerContainer = document.getElementById('overlayPlayerContainer');
+        const videoEl = document.getElementById('overlayVideo');
+        
+        try {
+            const response = await fetch(`/api/video/${token}/${filename}`, {
+                headers: { 'authtoken': authToken }
+            });
+            if (!response.ok) throw new Error('Ошибка загрузки файла');
             
-        } catch (error) {
-            console.error('History error:', error);
-            const historyContainer = safeElement('historyContainer');
-            if (historyContainer) {
-                historyContainer.innerHTML = `<div class="error">${error.message}</div>`;
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            
+            videoEl.src = url;
+            playerContainer.style.display = 'block';
+            videoEl.play();
+            
+            playerContainer.scrollIntoView({ behavior: 'smooth' });
+            videoEl.onended = () => URL.revokeObjectURL(url);
+            
+        } catch (e) {
+            alert('Не удалось воспроизвести видео');
+        }
+    };
+
+    // В index.js
+
+    window.closeOverlayVideo = function() {
+        const playerContainer = document.getElementById('overlayPlayerContainer');
+        const videoEl = document.getElementById('overlayVideo');
+
+        // 1. Безопасно останавливаем обычное видео (если элемент есть)
+        if (videoEl) {
+            videoEl.pause();
+            videoEl.src = "";
+        }
+
+        // 2. Безопасно останавливаем RTSP плеер (JSMpeg)
+        // Проверяем, существует ли переменная jsmpegPlayer и не null ли она
+        if (typeof jsmpegPlayer !== 'undefined' && jsmpegPlayer) {
+            try {
+                jsmpegPlayer.destroy();
+            } catch (e) {
+                console.log("Ошибка при остановке JSMpeg:", e);
+            }
+            jsmpegPlayer = null;
+        }
+
+        // 3. Скрываем контейнер
+        if (playerContainer) {
+            playerContainer.style.display = 'none';
+            // Очищаем содержимое (убираем canvas, восстанавливаем video тег для следующего раза)
+            // Это важно, чтобы при следующем открытии телефона там снова был тег video
+            playerContainer.innerHTML = '<video id="overlayVideo" controls playsinline style="width:100%; max-height:60vh;"></video>';
+        }
+    };
+
+    window.downloadVideo = async function(token, filename) {
+        try {
+            const response = await fetch(`/api/video/${token}/${filename}?download=1`, {
+                headers: { 'authtoken': authToken }
+            });
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            alert('Ошибка скачивания');
+        }
+    };
+
+    window.deleteDevice = async function(token) {
+        if(!confirm(`Удалить устройство ${token}? Все данные будут потеряны.`)) return;
+        try {
+            await fetch(`/api/devices/${token}?rpi_id=${encodeURIComponent(rpiId)}`, { method: 'DELETE' });
+            loadDevices(); // Обновляем список
+        } catch(e) {
+            alert('Ошибка удаления');
+        }
+    };
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // ==========================================
+    // 4. ОБЩАЯ ЛОГИКА (Сенсоры, История, Вкладки)
+    // ==========================================
+   
+
+    async function loadNetworkSettings() {
+        if (!rpiId) return;
+        try {
+            const res = await fetch(`/api/wifi?rpi_id=${rpiId}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (document.getElementById('wifiSSID')) document.getElementById('wifiSSID').value = data.wifi_ssid || '';
+                if (document.getElementById('wifiPass')) document.getElementById('wifiPass').value = data.wifi_password || '';
+                // if (document.getElementById('apSSID')) document.getElementById('apSSID').value = data.ap_ssid || '';
+                // if (document.getElementById('apPass')) document.getElementById('apPass').value = data.ap_password || '';
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    // 2. Обработчик формы
+    const netForm = document.getElementById('networkForm');
+    if (netForm) {
+        netForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (isTempAccess) { alert('Демо режим'); return; }
+            
+            const wifi_ssid = document.getElementById('wifiSSID').value;
+            const wifi_password = document.getElementById('wifiPass').value;
+            // const ap_ssid = document.getElementById('apSSID').value;
+            // const ap_password = document.getElementById('apPass').value;
+
+            try {
+                const res = await fetch('/api/wifi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        rpi_id: rpiId, 
+                        wifi_ssid, wifi_password
+                        // ap_ssid, ap_password
+                    })
+                });
+                if (res.ok) alert('Настройки сети сохранены');
+                else alert('Ошибка сохранения');
+            } catch (e) { alert('Ошибка сети'); }
+        });
+    }
+
+
+    
+    
+    
+    // Обновление ссылки на Telegram
+    function updateTelegramLink() {
+        const telegramBtn = document.getElementById('telegramButton');
+        if (telegramBtn) {
+            if (isTempAccess) {
+                telegramBtn.href = "https://t.me/DataCybSec_bot?start";
+            } else {
+                const login = localStorage.getItem('rpiId');
+                const password = localStorage.getItem('tg_password');
+                if (login && password) {
+                    telegramBtn.href = `https://t.me/DataCybSec_bot?start=${encodeURIComponent(login + '_' + password)}`;
+                } else {
+                    telegramBtn.href = "https://t.me/DataCybSec_bot?start";
+                }
             }
         }
     }
+    updateTelegramLink();
 
-    // Загрузка последних данных сенсоров
+    // Загрузка сенсоров
     async function loadLatestSensorData() {
         if (!rpiId) return;
         try {
             const response = await fetch(`/api/latest_sensor_data?rpi_id=${rpiId}`);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Ошибка ${response.status}: ${errorText}`);
-            }
-            
+            if (!response.ok) return;
             const data = await response.json();
             
-            safeUpdate('temp-value', data.temp);
-            safeUpdate('humidity-value', data.humidity);
-            safeUpdate('co-value', data.co_ppm);
-            safeUpdate('solar-value', data.solar_voltage);
-            safeUpdate('wind-value', data.wind_voltage);
-            safeUpdate('battery-value', data.battery_level);
-            safeUpdate('motion-value', data.motion, val => val ? 'Обнаружено' : 'Нет');
-            
-            const batteryIcon = safeElement('battery-icon');
-            if (batteryIcon && data.battery_level) {
-                const level = Math.min(100, Math.max(0, Math.floor(data.battery_level)));
-                batteryIcon.setAttribute('data-level', level);
+            safeUpdate('temp-value', data.temp || 'N/A');
+            safeUpdate('humidity-value', data.humidity || 'N/A');
+            safeUpdate('co-value', data.co_ppm || 'N/A');
+            safeUpdate('solar-value', data.solar_voltage || 'N/A');
+            safeUpdate('wind-value', data.wind_voltage || 'N/A');
+            safeUpdate('battery-value', data.battery_level || 'N/A');
+            safeUpdate('motion-value', String(data.motion).toLowerCase() === 'true' ? 'Есть' : 'Нет');
+            // console.log('motion:', data.motion, typeof data.motion, !!data.motion);
+
+            const statusText = document.getElementById('statusText');
+            const statusIcon = document.getElementById('statusIcon');
+            if(statusText && data.timestamp) {
+                const diff = Date.now() - new Date(data.timestamp).getTime();
+                // 5 минут таймаут для статуса RPi
+                const isOnline = diff < 5 * 60 * 1000;
+                statusText.textContent = isOnline ? 'Онлайн' : 'Оффлайн';
+                statusIcon.style.color = isOnline ? 'var(--primary)' : 'var(--danger)';
             }
-            
-        } catch (error) {
-            console.error('Ошибка загрузки данных:', error);
-            safeUpdate('temp-value', '--');
-            safeUpdate('humidity-value', '--');
-            safeUpdate('co-value', '--');
-            safeUpdate('solar-value', '--');
-            safeUpdate('wind-value', '--');
-            safeUpdate('battery-value', '--');
-            safeUpdate('motion-value', '--');
-        }
+        } catch (e) { console.error(e); }
     }
 
-    // Уведомления FCM
-    function updateFCMButton() {
-        const enableFCM = safeElement('enableFCM');
-        if (!enableFCM) return;
+    // Загрузка истории (График)
+    async function loadHistory() {
+        const ctx = document.getElementById('historyChart')?.getContext('2d');
+        const sensor = document.getElementById('historySensor').value;
+        const days = document.getElementById('historyRange').value;
         
-        const permission = Notification.permission;
-        
-        if (permission === 'granted') {
-            enableFCM.textContent = 'Уведомления разрешены';
-            enableFCM.disabled = true;
-        } else if (permission === 'denied') {
-            enableFCM.textContent = 'Включите в настройках браузера';
-            enableFCM.disabled = true;
-        } else {
-            enableFCM.textContent = 'Разрешить push-уведомления';
-            enableFCM.disabled = false;
-        }
-    }
+        if (!ctx) return;
+        if (historyChart) historyChart.destroy();
 
-    // Инициализация темы
-    const currentTheme = localStorage.getItem('theme') || 'light';
-    document.documentElement.setAttribute('data-theme', currentTheme);
-    const themeToggle = safeElement('themeToggle');
-    if (themeToggle) {
-        themeToggle.textContent = currentTheme === 'light' ? 'Темная тема' : 'Светлая тема';
-    }
-
-    // ========== ИНИЦИАЛИЗАЦИЯ ЭЛЕМЕНТОВ ========== //
-    const tabBtns = document.querySelectorAll('.tab-btn');
-    const tabContents = document.querySelectorAll('.tab-content');
-    const logoutBtn = safeElement('logoutBtn');
-    const changePasswordForm = safeElement('changePasswordForm');
-    const historySensor = safeElement('historySensor');
-    const historyRange = safeElement('historyRange');
-    const awayScenarioSwitch = safeElement('awayScenario');
-    const addDeviceBtn = safeElement('addDeviceBtn');
-    const enableFCM = safeElement('enableFCM');
-    const deviceIdInput = safeElement('deviceIdInput');
-    const deviceRole = safeElement('deviceRole');
-    const deviceTabs = document.querySelectorAll('#devices .tab');
-
-    // ========== ОБРАБОТЧИКИ СОБЫТИЙ ========== //
-
-    // Выход из системы
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('rpiId');
-            localStorage.removeItem('tempAccess');
-            sessionStorage.removeItem('tg_login');
-            sessionStorage.removeItem('tg_password');
-            window.location.href = 'login.html';
-        });
-    }
-
-    // Переключение темы
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-            
-            document.documentElement.setAttribute('data-theme', newTheme);
-            themeToggle.textContent = newTheme === 'light' ? 'Темная тема' : 'Светлая тема';
-            localStorage.setItem('theme', newTheme);
-        });
-    }
-
-    // Переключение вкладок
-    if (tabBtns.length > 0) {
-        tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.dataset.tab;
-                localStorage.setItem('activeTab', tab);
-
-                Object.values(cameraUpdateIntervals).forEach(clearInterval);
-                cameraUpdateIntervals = {};
-                
-                tabBtns.forEach(b => b.classList.remove('active'));
-                tabContents.forEach(c => c.classList.remove('active'));
-                btn.classList.add('active');
-                const tabElement = safeElement(tab);
-                if (tabElement) tabElement.classList.add('active');
-                
-                if (tab === 'dashboard') {
-                    setTimeout(() => {
-                        loadLatestSensorData();
-                    }, 100);
-                } else if (tab === 'history') {
-                    setTimeout(loadHistory, 300);
-                } else if (tab === 'devices') {
-                    setTimeout(() => {
-                        updateDeviceCards();
-                        loadDevicesList();
-                    }, 100);
-                }
-            });
-        });
-    }
-
-    // События подключения сокета
-    if (socket) {
-        socket.on('sensor_update', (data) => {
-            safeUpdate('temp-value', data.temp);
-            safeUpdate('humidity-value', data.humidity);
-            safeUpdate('co-value', data.co_ppm);
-            safeUpdate('solar-value', data.solar_voltage);
-            safeUpdate('wind-value', data.wind_voltage);
-            safeUpdate('battery-value', data.battery_level);
-            safeUpdate('motion-value', data.motion, val => val ? 'Обнаружено' : 'Нет');
-            
-            const batteryIcon = safeElement('battery-icon');
-            if (batteryIcon && data.battery_level) {
-                const level = Math.min(100, Math.max(0, Math.floor(data.battery_level)));
-                batteryIcon.setAttribute('data-level', level);
-            }
-        });
-
-        socket.on('connect', () => {
-            updateRpiStatus('Подключено к серверу');
-            if (rpiId) socket.emit('join', { rpi_id: rpiId });
-        });
-
-        socket.on('disconnect', () => {
-            updateRpiStatus('Отключено от сервера', true);
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('Socket error:', error);
-            updateRpiStatus('Ошибка подключения', true);
-        });
-
-        socket.on('device_update', (data) => {
-            if (data.role === 'flashlight') {
-                const button = document.querySelector(`.btn-flashlight[data-device-id="${data.id}"]`);
-                if (button) {
-                    button.classList.toggle('active', data.flashlight_active);
-                    button.textContent = data.flashlight_active ? 'Выключить' : 'Включить';
-                }
-            }
-        });
-    }
-
-    async function updateDevicesDashboard() {
-        if (!rpiId) return;
         try {
-            const container = safeElement('devicesContainer');
-            if (!container) return;
+            const res = await fetch(`/api/history?sensor=${sensor}&days=${days}&rpi_id=${rpiId}`);
+            const data = await res.json();
             
-            container.innerHTML = '';
-            
-            const response = await fetch(`/api/devices?rpi_id=${rpiId}`, {
-                headers: { 
-                    'Authorization': `Bearer ${authToken}`
-                }
+            historyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: sensor,
+                        data: data.values || [],
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
             });
-            
-            if (!response.ok) throw new Error('Ошибка загрузки устройств');
-            const devices = await response.json();
-            
-            devices.forEach(device => {
-                const card = document.createElement('div');
-                card.className = 'device-card';
-                card.innerHTML = `
-                    <h3>${device.role === 'camera' ? 'Камера' : 'Свет'} ${device.id}</h3>
-                    <div class="device-status">
-                        <span>Статус: ${device.is_online ? 'Онлайн' : 'Оффлайн'}</span>
-                        <span>Последняя активность: ${device.last_seen ? new Date(device.last_seen).toLocaleString() : 'Нет данных'}</span>
-                    </div>
-                    <div class="device-controls">
-                        ${device.role === 'camera' ? `
-                            <button class="btn-record" data-device-id="${device.id}">Запись</button>
-                        ` : ''}
-                        <label class="switch">
-                            <input type="checkbox" ${device.role === 'camera' ? 
-                                (device.camera_active ? 'checked' : '') : 
-                                (device.flashlight_active ? 'checked' : '')} 
-                                data-device-id="${device.id}" 
-                                data-command="${device.role === 'camera' ? 'camera' : 'flashlight'}">
-                            <span class="slider"></span>
-                        </label>
-                        <span>${device.role === 'camera' ? 'Трансляция' : 'Включить'}</span>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-            
-            container.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                checkbox.addEventListener('change', function() {
-                    const deviceId = this.dataset.deviceId;
-                    const command = this.dataset.command;
-                    sendDeviceCommand(deviceId, command, this.checked);
-                });
-            });
-            
-            container.querySelectorAll('.btn-record').forEach(button => {
-                button.addEventListener('click', function() {
-                    const deviceId = this.dataset.deviceId;
-                    sendDeviceCommand(deviceId, 'record_video', 60);
-                });
-            });
-            
-        } catch (error) {
-            console.error('Devices dashboard error:', error);
-        }
+        } catch(e) { console.error(e); }
     }
-    
-    // Смена пароля
-    if (changePasswordForm) {
-        changePasswordForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const currentPassword = safeElement('currentPassword')?.value;
-            const newPassword = safeElement('newPassword')?.value;
-            const confirmPassword = safeElement('confirmPassword')?.value;
 
-            if (!rpiId || rpiId === 'unknown') {
-                alert('Требуется авторизация');
-                return;
-            }
+    // Логика вкладок
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn, .tab-content').forEach(el => el.classList.remove('active'));
+            btn.classList.add('active');
+            const tabId = btn.dataset.tab;
+            document.getElementById(tabId).classList.add('active');
             
-            if (!currentPassword || !newPassword || !confirmPassword) {
-                alert('Заполните все поля');
-                return;
+            // Загрузка данных при переключении
+            if (tabId === 'dashboard') {
+                loadLatestSensorData();
+                loadDevices();
             }
-            
-            if (newPassword !== confirmPassword) {
-                alert('Пароли не совпадают');
-                return;
-            }
-            
-            try {                       
-                const response = await fetch(`/api/change_password`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({ 
-                        rpi_id: rpiId,
-                        old_password: currentPassword,
-                        new_password: newPassword 
-                    })
-                });
-
-                const data = await response.json();
-                if (response.ok) {
-                    alert('Пароль изменен');
-                    changePasswordForm.reset();
-                } else {
-                    alert(data.error || 'Ошибка');
-                }
-            } catch (error) {
-                console.error('Password change error:', error);
-                alert('Ошибка сети');
-            }
+            if (tabId === 'history') loadHistory();
+            if (btn.dataset.tab === 'settings') {loadNetworkSettings(); loadIpCameras();}
         });
-    }
-
-    // История данных
-    if (historySensor && historyRange) {
-        historySensor.addEventListener('change', loadHistory);
-        historyRange.addEventListener('change', loadHistory);
-    }
-
-    // Уведомления FCM
-    updateFCMButton();
-    if (enableFCM) {
-        enableFCM.addEventListener('click', async () => {
-            try {
-                const permission = await Notification.requestPermission();
-                if (permission === 'granted') {
-                    alert('Уведомления разрешены!');
-                }
-                updateFCMButton();
-            } catch (e) {
-                console.error('Notification error:', e);
-            }
-        });
-    }
-
-    // Добавление устройства
-    if (addDeviceBtn && deviceIdInput && deviceRole) {
-        addDeviceBtn.addEventListener('click', async () => {
-            const deviceId = deviceIdInput.value.trim();
-            const role = deviceRole.value;
-            
-            if (!deviceId) {
-                alert('Введите ID устройства');
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/api/devices`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({
-                        id: deviceId,
-                        role: role,
-                        rpi_id: rpiId
-                    })
-                });
-                
-                const data = await response.json();
-                if (response.ok) {
-                    alert(`Устройство добавлено: ${data.device_id}`);
-                    loadDevicesList();
-                    deviceIdInput.value = '';
-                } else {
-                    alert(data.error || 'Ошибка при добавлении устройства');
-                }
-            } catch (error) {
-                console.error('Add device error:', error);
-                alert('Ошибка сети');
-            }
-        });
-    }
-
-    // Обработчик сценария "Уход"
-    if (awayScenarioSwitch) {
-        awayScenarioSwitch.addEventListener('change', (e) => {
-            const devices = JSON.parse(localStorage.getItem('devices') || '[]');
-            devices.forEach(device => {
-                sendDeviceCommand(device.id, "update_state", JSON.stringify({
-                    away_mode: e.target.checked,
-                    camera_active: e.target.checked
-                }));
-            });
-        });
-    }
-
-    // Инициализация уведомлений
-    setupNotificationHandlers();
-
-    // Данные пользователя для логов
-    const userData = {
-        device_type: /Mobile|Android|iPhone/i.test(navigator.userAgent) ? "Mobile" : "Desktop",
-        browser: navigator.userAgent.match(/(Chrome|Firefox|Safari|Edge)\//i)?.[0]?.split('/')[0] || 'Unknown',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        referrer: document.referrer || 'direct',
-        rpi_id: rpiId || 'unknown'
-    };
-
-    // Управление вкладками устройств
-    if (deviceTabs.length > 0) {
-        deviceTabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabName = tab.dataset.tab;
-                deviceTabs.forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('#devices .tab-content').forEach(tc => tc.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById(tabName).classList.add('active');
-                
-                if (tabName === 'devices-dashboard') {
-                    updateDevicesDashboard();
-                } else if (tabName === 'devices-list') {
-                    loadDevicesList();
-                }
-            });
-        });
-    }
-
-    // Очистка при закрытии
-    window.addEventListener('beforeunload', () => {
-        Object.values(cameraUpdateIntervals).forEach(clearInterval);
-        if (socket && socket.connected) {
-            socket.disconnect();
-        }
     });
 
-    // Инициализация начальных данных
-    setTimeout(() => {
-        loadLatestSensorData();
-        updateDeviceCards();
-    }, 500);
+    document.getElementById('refreshDevicesBtn')?.addEventListener('click', loadDevices);
+    
+    // Переключатель темы
+    document.getElementById('themeToggle')?.addEventListener('click', () => {
+        const newTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+    });
+
+    // Логаут
+    document.getElementById('logoutBtn')?.addEventListener('click', () => {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('rpiId');
+        localStorage.removeItem('tempAccess');
+        localStorage.removeItem('tg_password');
+        window.location.href = 'login.html';
+    });
+    
+    // События графиков
+    document.getElementById('historySensor')?.addEventListener('change', loadHistory);
+    document.getElementById('historyRange')?.addEventListener('change', loadHistory);
+
+    // Смена пароля
+    const passForm = document.getElementById('changePasswordForm');
+    if (passForm) {
+        passForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const currentPassword = document.getElementById('currentPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (newPassword !== confirmPassword) {
+                alert("Новые пароли не совпадают");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/change_password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rpi_id: rpiId, old_password: currentPassword, new_password: newPassword })
+                });
+                if (res.ok) {
+                    // alert("Пароль успешно изменен");
+                    passForm.reset();
+                    // Обновляем для телеграма
+                    localStorage.setItem('tg_password', newPassword);
+                    updateTelegramLink();
+                } else {
+                    alert("Ошибка: неверный текущий пароль");
+                }
+            } catch (e) { alert("Ошибка сети"); }
+        });
+    }
+
+    
+    
+    // Загрузка темы
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    
+    // Загрузка настроек
+    loadUserSettings();     
+    initSettingsListeners(); 
+    
+    // Эмуляция клика по активной вкладке для старта
+    const activeTabBtn = document.querySelector('.tab-btn.active');
+    if(activeTabBtn) activeTabBtn.click();
+    else loadLatestSensorData();
+
+    // Автообновление (каждые 5 сек)
+    setInterval(() => {
+        // Обновляем только если вкладка Dashboard активна
+        const activeTab = document.querySelector('.tab-content.active')?.id;
+        if (activeTab === 'dashboard') {
+            loadLatestSensorData();
+            loadDevices();
+        } 
+    }, 5000);
 });
